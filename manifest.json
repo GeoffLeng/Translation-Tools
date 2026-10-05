@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Lite Translate",
+  "version": "1.0.0",
+  "description": "极简优雅的划词翻译、AI 智能查词与 PDF 文档阅读扩展",
+  "permissions": [
+    "storage",
+    "contextMenus",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon.svg"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon.svg",
+    "48": "icons/icon.svg",
+    "128": "icons/icon.svg"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["pdf_viewer.html", "icons/icon.svg", "pdf.worker.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

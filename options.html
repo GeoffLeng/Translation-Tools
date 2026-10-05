@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Lite Translate - 设置</title>
+  <link rel="stylesheet" href="/src/styles/options.css">
+</head>
+<body>
+  <div class="options-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <img src="/icons/icon.svg" class="sidebar-logo" alt="logo">
+        <h2>Lite Translate</h2>
+      </div>
+      <nav class="sidebar-menu">
+        <a href="#general" class="menu-item active" data-tab="general">通用设置</a>
+        <a href="#engines" class="menu-item" data-tab="engines">翻译引擎</a>
+        <a href="#pdf-settings" class="menu-item" data-tab="pdf-settings">PDF 阅读器</a>
+        <a href="#about" class="menu-item" data-tab="about">关于</a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- General Tab -->
+      <section id="general-tab" class="tab-pane active">
+        <h1 class="page-title">通用设置</h1>
+        <div class="ios-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">启用划词翻译</span>
+              <span class="setting-desc">在网页中选中文字时显示翻译图标</span>
+            </div>
+            <label class="ios-switch">
+              <input type="checkbox" id="enable-selection-translate" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">自动展示浮窗</span>
+              <span class="setting-desc">划词后不需要点击图标，直接展示翻译结果</span>
+            </div>
+            <label class="ios-switch">
+              <input type="checkbox" id="auto-show-panel">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">划词触发快捷键</span>
+              <span class="setting-desc">避免日常选中文本或复制时意外弹出</span>
+            </div>
+            <select id="trigger-mode" class="ios-select">
+              <option value="direct">直接划词触发</option>
+              <option value="alt">按住 Alt (Option) 划词</option>
+              <option value="ctrl">按住 Ctrl (Command) 划词</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">默认翻译目标语言</span>
+              <span class="setting-desc">翻译文本时的默认输出语言</span>
+            </div>
+            <select id="default-target-lang" class="ios-select">
+              <option value="zh-CN">中文(简体)</option>
+              <option value="en">英语</option>
+              <option value="ja">日语</option>
+              <option value="ko">韩语</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Engines Tab -->
+      <section id="engines-tab" class="tab-pane">
+        <h1 class="page-title">翻译引擎配置</h1>
+        <div class="ios-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">默认翻译引擎</span>
+              <span class="setting-desc">划词及Popup翻译默认使用的翻译服务</span>
+            </div>
+            <select id="default-engine" class="ios-select">
+              <option value="google">Google 翻译 (免 Key)</option>
+            </select>
+          </div>
+        </div>
+
+        <h2 class="section-subtitle">AI 接口配置</h2>
+        <div class="ios-card">
+          <!-- Gemini -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">Gemini AI</span>
+              <a href="https://aistudio.google.com/" target="_blank" class="ios-link">获取免费 Key</a>
+            </div>
+            <input type="password" id="gemini-api-key" placeholder="输入 Gemini API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="gemini-model" class="ios-select" style="flex: 1;">
+                <option value="gemini-1.5-flash">gemini-1.5-flash (推荐·超低成本极速)</option>
+                <option value="gemini-2.0-flash">gemini-2.0-flash (最新高速)</option>
+                <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (极致轻量)</option>
+                <option value="gemini-1.5-pro">gemini-1.5-pro (长文本高精度)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- OpenAI -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">OpenAI (ChatGPT)</span>
+            </div>
+            <input type="password" id="openai-api-key" placeholder="输入 OpenAI API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="openai-model" class="ios-select" style="flex: 1;">
+                <option value="gpt-4o-mini">gpt-4o-mini (推荐·省90%+成本/高质量)</option>
+                <option value="gpt-4o">gpt-4o (全能旗舰)</option>
+                <option value="gpt-3.5-turbo">gpt-3.5-turbo (经典轻量)</option>
+              </select>
+            </div>
+            <input type="text" id="openai-endpoint" placeholder="接口地址 (可选，默认: https://api.openai.com/v1/chat/completions)" class="ios-input">
+          </div>
+
+          <!-- Claude -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">Claude (Anthropic)</span>
+            </div>
+            <input type="password" id="claude-api-key" placeholder="输入 Claude API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="claude-model" class="ios-select" style="flex: 1;">
+                <option value="claude-3-5-haiku-latest">claude-3-5-haiku-latest (推荐·经济极速)</option>
+                <option value="claude-3-5-sonnet-latest">claude-3-5-sonnet-latest (旗舰高智能)</option>
+                <option value="claude-3-haiku-20240307">claude-3-haiku-20240307 (经典经济型)</option>
+              </select>
+            </div>
+            <input type="text" id="claude-endpoint" placeholder="接口地址 (可选，默认: https://api.anthropic.com/v1/messages)" class="ios-input">
+          </div>
+
+          <!-- DeepSeek -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">DeepSeek</span>
+              <a href="https://platform.deepseek.com/" target="_blank" class="ios-link">获取 Key</a>
+            </div>
+            <input type="password" id="deepseek-api-key" placeholder="输入 DeepSeek API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="deepseek-model" class="ios-select" style="flex: 1;">
+                <option value="deepseek-chat">deepseek-chat (推荐·V3极致性价比)</option>
+                <option value="deepseek-reasoner">deepseek-reasoner (R1 深度思考推理)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Kimi -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">Kimi (月之暗面)</span>
+              <a href="https://platform.moonshot.cn/" target="_blank" class="ios-link">获取 Key</a>
+            </div>
+            <input type="password" id="kimi-api-key" placeholder="输入 Kimi API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="kimi-model" class="ios-select" style="flex: 1;">
+                <option value="moonshot-v1-8k">moonshot-v1-8k (推荐·标准8k最省钱)</option>
+                <option value="moonshot-v1-32k">moonshot-v1-32k (32k 上下文)</option>
+                <option value="moonshot-v1-128k">moonshot-v1-128k (128k 长文本)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- GLM -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">智谱 GLM</span>
+              <a href="https://open.bigmodel.cn/" target="_blank" class="ios-link">获取 Key</a>
+            </div>
+            <input type="password" id="glm-api-key" placeholder="输入 GLM API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="glm-model" class="ios-select" style="flex: 1;">
+                <option value="glm-4-flash">glm-4-flash (推荐·官方免费/超低成本)</option>
+                <option value="glm-4-air">glm-4-air (极速高性价比)</option>
+                <option value="glm-4-plus">glm-4-plus (旗舰高性能)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 豆包 -->
+          <div class="setting-group" style="border-bottom: 1px solid rgba(0,0,0,0.04); padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">火山引擎豆包</span>
+              <a href="https://www.volcengine.com/" target="_blank" class="ios-link">获取 Key / 接入点</a>
+            </div>
+            <input type="password" id="doubao-api-key" placeholder="输入 API Key" class="ios-input" style="margin-bottom: 8px;">
+            <input type="text" id="doubao-model" placeholder="接入点 ID (Endpoint ID，建议建 doubao-lite-4k 节约成本)" class="ios-input" style="margin-bottom: 8px;">
+            <input type="text" id="doubao-endpoint" placeholder="接口地址 (可选，默认: https://ark.cn-beijing.volces.com/api/v3/chat/completions)" class="ios-input">
+          </div>
+
+          <!-- NVIDIA NIM -->
+          <div class="setting-group" style="padding-bottom: 16px;">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">NVIDIA NIM</span>
+              <a href="https://build.nvidia.com/" target="_blank" class="ios-link">获取 Key</a>
+            </div>
+            <input type="password" id="nvidia-api-key" placeholder="输入 NVIDIA NIM API Key" class="ios-input" style="margin-bottom: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 13px; color: #8e8e93; min-width: 65px;">翻译模型:</span>
+              <select id="nvidia-model" class="ios-select" style="flex: 1;">
+                <option value="meta/llama-3.1-8b-instruct">meta/llama-3.1-8b-instruct (推荐·极速轻量低耗)</option>
+                <option value="meta/llama-3.3-70b-instruct">meta/llama-3.3-70b-instruct (高质量开源)</option>
+                <option value="deepseek-ai/deepseek-r1">deepseek-ai/deepseek-r1 (开源R1深度推理)</option>
+              </select>
+            </div>
+            <input type="text" id="nvidia-endpoint" placeholder="接口地址 (可选，默认: https://integrate.api.nvidia.com/v1/chat/completions)" class="ios-input">
+          </div>
+
+          <!-- 有道智云 -->
+          <div class="setting-group" style="padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.04);">
+            <div class="setting-input-header">
+              <span class="setting-title" style="font-weight:600;">有道智云 (官方 API)</span>
+              <a href="https://ai.youdao.com/" target="_blank" class="ios-link">获取免费额度 Key</a>
+            </div>
+            <input type="text" id="youdao-app-key" placeholder="输入有道应用 ID (AppKey)" class="ios-input" style="margin-bottom: 8px;">
+            <input type="password" id="youdao-app-secret" placeholder="输入有道应用密钥 (AppSecret)" class="ios-input">
+          </div>
+        </div>
+
+        <h2 class="section-subtitle">自定义模型管理</h2>
+        <div class="ios-card">
+          <div class="setting-item" style="border-bottom: none; align-items: flex-start; flex-direction: column; gap: 12px; padding: 16px;">
+            <div style="display: flex; width: 100%; justify-content: space-between; align-items: center;">
+              <span class="setting-title" style="font-weight:600;">自定义模型列表</span>
+              <button id="add-custom-btn" class="ios-button secondary-btn" style="padding: 6px 12px; font-size: 13px;">+ 添加自定义模型</button>
+            </div>
+            <div id="custom-models-list" style="width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px;">
+              <!-- 动态添加 -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PDF Settings Tab -->
+      <section id="pdf-settings-tab" class="tab-pane">
+        <h1 class="page-title">PDF 阅读器设置</h1>
+        <div class="ios-card">
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">当在浏览器打开 PDF 时</span>
+              <span class="setting-desc">配置扩展如何处理 PDF 文档链接</span>
+            </div>
+            <select id="pdf-action" class="ios-select">
+              <option value="ask">弹窗询问是否用扩展打开</option>
+              <option value="native">使用浏览器默认打开</option>
+              <option value="extension">默认直接用本扩展打开</option>
+            </select>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">在右键菜单添加“使用扩展阅读 PDF”</span>
+              <span class="setting-desc">右键点击网页 PDF 链接可快捷用扩展阅读</span>
+            </div>
+            <label class="ios-switch">
+              <input type="checkbox" id="pdf-context-menu" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- About Tab -->
+      <section id="about-tab" class="tab-pane">
+        <h1 class="page-title">关于 Lite Translate</h1>
+        <div class="ios-card about-card">
+          <div class="brand-large">
+            <img src="/icons/icon.svg" class="logo-large" alt="logo">
+            <h3>Lite Translate</h3>
+            <span class="version-tag">Version 1.0.0</span>
+          </div>
+          <p class="about-text">
+            专注纯粹高效的极简划词翻译与 AI 智能查词工具。采用轻量 Shadow DOM 隔离与原生组件封装，保证完全零样式侵入，提供极速响应、优雅克制的划词翻译与长文档 PDF 沉浸式阅读体验。
+          </p>
+          <div class="developer-info">
+            <span>Multi-Engine & AI-Powered Translator</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Add Custom Model Modal -->
+  <div id="custom-model-modal" class="modal-container hidden">
+    <div class="modal-overlay" id="custom-modal-overlay"></div>
+    <div class="modal-box">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0; font-size: 17px; font-weight: 600;">添加自定义模型</h3>
+        <button id="close-custom-modal-btn" class="modal-close-btn" title="关闭">✕</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">模型厂商</span>
+        <select id="modal-provider" class="ios-select" style="width: 100%; padding: 10px; background-position: right 14px center;">
+          <option value="custom">自定义 (OpenAI 兼容)</option>
+        </select>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">接口地址</span>
+        <input type="text" id="modal-endpoint" placeholder="https://api.example.com/v1/chat/completions" class="ios-input">
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">API Key</span>
+        <div style="position: relative; width: 100%;">
+          <input type="password" id="modal-api-key" placeholder="输入您的 API Key" class="ios-input" style="padding-right: 40px; width: 100%; box-sizing: border-box;">
+          <button id="modal-toggle-key" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: #8e8e93; font-size: 12px; display: flex; align-items: center;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </button>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">模型名称</span>
+        <input type="text" id="modal-model-name" placeholder="例如: gpt-4, deepseek-chat" class="ios-input">
+      </div>
+
+      <div>
+        <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">高级配置</span>
+        <div style="display: flex; gap: 12px; margin-top: 6px;">
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 11px; color: #8e8e93;">输入单价 ($ / 1M token)</span>
+            <input type="text" id="modal-input-price" placeholder="使用默认值" class="ios-input">
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 11px; color: #8e8e93;">输出单价 ($ / 1M token)</span>
+            <input type="text" id="modal-output-price" placeholder="使用默认值" class="ios-input">
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size: 11px; color: #8e8e93; margin: 0; line-height: 1.3;">自定义配置，请遵守当地法规并关注模型规则和 token 消耗。</p>
+
+      <button id="modal-save-btn" class="modal-btn primary" style="width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; cursor: pointer; border: none; color: white; background: linear-gradient(135deg, #0A84FF, #5E5CE6);">保存</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/options.js"></script>
+</body>
+</html>
