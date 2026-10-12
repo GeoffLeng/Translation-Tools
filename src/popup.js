@@ -19,47 +19,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let debounceTimer;
 
-  // AI 模型内置字典 (首位均为高性价比推荐模型，节省调用成本)
+  // AI 模型内置字典 (智谱 GLM 4/4.5/4.7 Flash 官方模型永久免费)
   const AI_MODELS = {
-    gemini: [
-      'gemini-1.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash-8b',
-      'gemini-1.5-pro'
-    ],
-    openai: [
-      'gpt-4o-mini',
-      'gpt-4o',
-      'gpt-3.5-turbo'
-    ],
-    claude: [
-      'claude-3-5-haiku-latest',
-      'claude-3-5-sonnet-latest',
-      'claude-3-haiku-20240307'
-    ],
-    deepseek: [
-      'deepseek-chat',
-      'deepseek-reasoner'
-    ],
-    kimi: [
-      'moonshot-v1-8k',
-      'moonshot-v1-32k',
-      'moonshot-v1-128k'
-    ],
     glm: [
       'glm-4-flash',
-      'glm-4-air',
-      'glm-4-plus'
-    ],
-    doubao: [
-      'doubao-lite-4k',
-      'doubao-pro-4k',
-      'doubao-lite-128k'
-    ],
-    nvidia: [
-      'meta/llama-3.1-8b-instruct',
-      'meta/llama-3.3-70b-instruct',
-      'deepseek-ai/deepseek-r1'
+      'glm-4.5-flash',
+      'glm-4.7-flash',
+      'glm-4-flashx'
     ]
   };
 
@@ -92,15 +58,9 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
       defaultTargetLang: 'zh-CN',
       defaultEngine: 'google',
-      geminiApiKey: '',
-      openaiApiKey: '',
-      claudeApiKey: '',
-      deepseekApiKey: '',
-      kimiApiKey: '',
       glmApiKey: '',
-      doubaoApiKey: '',
-      doubaoModel: '',
-      nvidiaApiKey: '',
+      glmModels: null,
+      deeplApiKey: '',
       youdaoAppKey: '',
       youdaoAppSecret: '',
       customModels: []
@@ -108,38 +68,22 @@ document.addEventListener('DOMContentLoaded', () => {
       // 填充目标语言
       tgtLang.value = result.defaultTargetLang;
 
-      // 动态构建可选引擎列表 (仅已配置 API Key 的 AI 引擎才显示)
+      // 动态载入用户在设置中启用的模型列表
+      if (Array.isArray(result.glmModels) && result.glmModels.length > 0) AI_MODELS.glm = result.glmModels;
+
+      // 动态构建可选引擎列表
       engineSelect.innerHTML = '';
       const available = [
-        { value: 'google', label: 'Google' }
+        { value: 'google', label: 'Google' },
+        { value: 'bing', label: 'Bing' },
+        { value: 'deepl', label: 'DeepL' }
       ];
 
-      if (result.youdaoAppKey && result.youdaoAppSecret) {
-        available.push({ value: 'youdao', label: '有道' });
-      }
-      if (result.geminiApiKey) {
-        available.push({ value: 'gemini', label: 'Gemini' });
-      }
-      if (result.openaiApiKey) {
-        available.push({ value: 'openai', label: 'OpenAI' });
-      }
-      if (result.claudeApiKey) {
-        available.push({ value: 'claude', label: 'Claude' });
-      }
-      if (result.deepseekApiKey) {
-        available.push({ value: 'deepseek', label: 'DeepSeek' });
-      }
-      if (result.kimiApiKey) {
-        available.push({ value: 'kimi', label: 'Kimi' });
-      }
       if (result.glmApiKey) {
         available.push({ value: 'glm', label: '智谱GLM' });
       }
-      if (result.doubaoApiKey) {
-        available.push({ value: 'doubao', label: '豆包' });
-      }
-      if (result.nvidiaApiKey) {
-        available.push({ value: 'nvidia', label: 'NVIDIA NIM' });
+      if (result.youdaoAppKey && result.youdaoAppSecret) {
+        available.push({ value: 'youdao', label: '有道' });
       }
 
       result.customModels.forEach(m => {
@@ -152,11 +96,6 @@ document.addEventListener('DOMContentLoaded', () => {
         opt.textContent = item.label;
         engineSelect.appendChild(opt);
       });
-
-      // 初始化豆包模型列表
-      if (result.doubaoModel) {
-        AI_MODELS.doubao = [result.doubaoModel];
-      }
 
       // 设置默认选中的翻译引擎 (若不可用则回退为 google)
       const availableValues = available.map(a => a.value);
@@ -177,13 +116,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 target: { tabId: tabs[0].id },
                 func: () => window.getSelection().toString().trim()
               }, (results) => {
+                if (chrome.runtime.lastError) {
+                  // 宿主网页安全策略限制等情况下忽略
+                  return;
+                }
                 if (results && results[0]?.result) {
                   sourceText.value = results[0].result;
                   clearBtn.classList.remove('hidden');
                   performTranslation();
                 }
-              }).catch(() => {
-                // 宿主网页安全策略限制等情况下忽略
               });
             }
           }
@@ -198,7 +139,13 @@ document.addEventListener('DOMContentLoaded', () => {
     modelSelect.innerHTML = '';
 
     if (AI_MODELS[engine]) {
-      const models = AI_MODELS[engine];
+      let models = AI_MODELS[engine];
+      // GLM 仅展示免费 Flash 模型
+      if (engine === 'glm') {
+        const freeModels = models.filter(m => m.toLowerCase().includes('flash'));
+        models = freeModels.length > 0 ? freeModels : ['glm-4-flash', 'glm-4.5-flash', 'glm-4.7-flash', 'glm-4-flashx'];
+      }
+
       models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m;

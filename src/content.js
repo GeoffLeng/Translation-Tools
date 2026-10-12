@@ -96,6 +96,29 @@
       transform: scale(1) translateY(0);
     }
 
+    /* 左右拉伸手柄 */
+    .panel-resize-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 10px;
+      cursor: ew-resize;
+      z-index: 100;
+    }
+
+    .resize-handle-left {
+      left: 0;
+    }
+
+    .resize-handle-right {
+      right: 0;
+    }
+
+    .panel-resize-handle:hover,
+    .panel-resize-handle.active {
+      background: rgba(0, 122, 255, 0.15);
+    }
+
     /* 面板头部 */
     .panel-header {
       padding: 12px 16px;
@@ -396,6 +419,9 @@
     </button>
 
     <div id="translate-panel" class="ios-panel hidden">
+      <!-- 左右拉伸调整手柄 -->
+      <div class="panel-resize-handle resize-handle-left" title="左右拖动调整宽度"></div>
+      <div class="panel-resize-handle resize-handle-right" title="左右拖动调整宽度"></div>
       <div class="panel-header" id="panel-drag-handle">
         <div class="panel-logo">
           <svg viewBox="0 0 24 24" class="logo-mini"><path d="M4 7h16M12 7v13M9 20h6" fill="none" stroke="currentColor" stroke-linecap="round"/></svg>
@@ -483,99 +509,139 @@
   let isPinned = false;
   let dragOffset = { x: 0, y: 0 };
 
-  // AI 模型内置字典 (首位均为高性价比推荐模型，节省调用成本)
+  // 浮窗左右拉伸逻辑
+  const handleLeft = shadowRoot.querySelector('.resize-handle-left');
+  const handleRight = shadowRoot.querySelector('.resize-handle-right');
+
+  // 从 storage 读取并恢复用户偏好的浮窗宽度
+  chrome.storage.local.get({ contentPanelWidth: 360 }, (res) => {
+    if (res.contentPanelWidth && res.contentPanelWidth >= 280) {
+      translatePanel.style.width = `${res.contentPanelWidth}px`;
+    }
+  });
+
+  function initResize(e, direction) {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startX = e.clientX;
+    const startWidth = translatePanel.offsetWidth;
+    const startLeft = translatePanel.offsetLeft;
+
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+    if (direction === 'left' && handleLeft) handleLeft.classList.add('active');
+    if (direction === 'right' && handleRight) handleRight.classList.add('active');
+
+    function onMouseMove(moveEvent) {
+      const deltaX = moveEvent.clientX - startX;
+
+      if (direction === 'right') {
+        const maxW = Math.max(280, window.innerWidth - startLeft - 20);
+        const newWidth = Math.max(280, Math.min(maxW, startWidth + deltaX));
+        translatePanel.style.width = `${newWidth}px`;
+      } else if (direction === 'left') {
+        const newWidth = Math.max(280, startWidth - deltaX);
+        const newLeft = startLeft + (startWidth - newWidth);
+        if (newLeft >= 10) {
+          translatePanel.style.width = `${newWidth}px`;
+          translatePanel.style.left = `${newLeft}px`;
+        }
+      }
+    }
+
+    function onMouseUp() {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (handleLeft) handleLeft.classList.remove('active');
+      if (handleRight) handleRight.classList.remove('active');
+
+      const finalWidth = translatePanel.offsetWidth;
+      chrome.storage.local.set({ contentPanelWidth: finalWidth });
+    }
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }
+
+  if (handleLeft) handleLeft.addEventListener('mousedown', (e) => initResize(e, 'left'));
+  if (handleRight) handleRight.addEventListener('mousedown', (e) => initResize(e, 'right'));
+
+  // 网页文本语义段落重构与断行清洗函数
+  function reconstructParagraphs(rawText) {
+    if (!rawText || typeof rawText !== 'string') return '';
+    let text = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rawParagraphs = text.split(/\n\s*\n+/);
+    const cleanParagraphs = rawParagraphs.map(paragraph => {
+      const rawLines = paragraph.split('\n').map(l => l.trim()).filter(Boolean);
+      if (rawLines.length === 0) return '';
+      if (rawLines.length === 1) return rawLines[0];
+
+      let merged = rawLines[0];
+      for (let i = 1; i < rawLines.length; i++) {
+        const prevLine = rawLines[i - 1];
+        const currLine = rawLines[i];
+        const isListItem = /^([-*•·]|(?:\d+|[a-zA-Z])[\.)])\s+/.test(currLine);
+        if (isListItem) {
+          merged += '\n' + currLine;
+          continue;
+        }
+        if (/([a-zA-Z]+)-$/.test(prevLine) && /^[a-zA-Z]/.test(currLine)) {
+          merged = merged.slice(0, -1) + currLine;
+          continue;
+        }
+        const prevEndsCJK = /[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]$/.test(merged);
+        const currStartsCJK = /^[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/.test(currLine);
+        if (prevEndsCJK && currStartsCJK) {
+          merged += currLine;
+        } else {
+          merged += ' ' + currLine;
+        }
+      }
+      return merged;
+    });
+    return cleanParagraphs.filter(Boolean).join('\n\n');
+  }
+
+  // AI 模型内置字典 (智谱 GLM 4/4.5/4.7 Flash 官方模型永久免费)
   const AI_MODELS = {
-    gemini: [
-      'gemini-1.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash-8b',
-      'gemini-1.5-pro'
-    ],
-    openai: [
-      'gpt-4o-mini',
-      'gpt-4o',
-      'gpt-3.5-turbo'
-    ],
-    claude: [
-      'claude-3-5-haiku-latest',
-      'claude-3-5-sonnet-latest',
-      'claude-3-haiku-20240307'
-    ],
-    deepseek: [
-      'deepseek-chat',
-      'deepseek-reasoner'
-    ],
-    kimi: [
-      'moonshot-v1-8k',
-      'moonshot-v1-32k',
-      'moonshot-v1-128k'
-    ],
     glm: [
       'glm-4-flash',
-      'glm-4-air',
-      'glm-4-plus'
-    ],
-    doubao: [
-      'doubao-lite-4k',
-      'doubao-pro-4k',
-      'doubao-lite-128k'
-    ],
-    nvidia: [
-      'meta/llama-3.1-8b-instruct',
-      'meta/llama-3.3-70b-instruct',
-      'deepseek-ai/deepseek-r1'
+      'glm-4.5-flash',
+      'glm-4.7-flash',
+      'glm-4-flashx'
     ]
   };
 
-  // 4. 动态加载可用引擎列表 (仅已配置 API Key 的 AI 引擎才显示)
+  // 4. 动态加载可用引擎列表
   function loadAvailableEngines(callback) {
     chrome.storage.local.get({
-      geminiApiKey: '',
-      openaiApiKey: '',
-      claudeApiKey: '',
-      deepseekApiKey: '',
-      kimiApiKey: '',
       glmApiKey: '',
-      doubaoApiKey: '',
-      doubaoModel: '',
-      nvidiaApiKey: '',
+      glmModels: null,
+      deeplApiKey: '',
       youdaoAppKey: '',
       youdaoAppSecret: '',
       customModels: []
     }, (result) => {
+      // 动态载入用户在设置中启用的模型列表
+      if (Array.isArray(result.glmModels) && result.glmModels.length > 0) AI_MODELS.glm = result.glmModels;
+
       const currentVal = panelEngineSelect.value;
       panelEngineSelect.innerHTML = '';
 
       const available = [
-        { value: 'google', label: 'Google' }
+        { value: 'google', label: 'Google' },
+        { value: 'bing', label: 'Bing' },
+        { value: 'deepl', label: 'DeepL' }
       ];
 
-      if (result.youdaoAppKey && result.youdaoAppSecret) {
-        available.push({ value: 'youdao', label: '有道' });
-      }
-      if (result.geminiApiKey) {
-        available.push({ value: 'gemini', label: 'Gemini' });
-      }
-      if (result.openaiApiKey) {
-        available.push({ value: 'openai', label: 'OpenAI' });
-      }
-      if (result.claudeApiKey) {
-        available.push({ value: 'claude', label: 'Claude' });
-      }
-      if (result.deepseekApiKey) {
-        available.push({ value: 'deepseek', label: 'DeepSeek' });
-      }
-      if (result.kimiApiKey) {
-        available.push({ value: 'kimi', label: 'Kimi' });
-      }
       if (result.glmApiKey) {
         available.push({ value: 'glm', label: '智谱GLM' });
       }
-      if (result.doubaoApiKey) {
-        available.push({ value: 'doubao', label: '豆包' });
-      }
-      if (result.nvidiaApiKey) {
-        available.push({ value: 'nvidia', label: 'NVIDIA NIM' });
+      if (result.youdaoAppKey && result.youdaoAppSecret) {
+        available.push({ value: 'youdao', label: '有道' });
       }
 
       result.customModels.forEach(m => {
@@ -588,10 +654,6 @@
         opt.textContent = item.label;
         panelEngineSelect.appendChild(opt);
       });
-
-      if (result.doubaoModel) {
-        AI_MODELS.doubao = [result.doubaoModel];
-      }
 
       const availableValues = available.map(a => a.value);
       if (availableValues.includes(currentVal)) {
@@ -628,15 +690,16 @@
 
     setTimeout(() => {
       const selection = window.getSelection();
-      const text = selection.toString().trim();
+      const rawText = selection.toString().trim();
 
-      if (!text || text.length < 1 || text.length > 2000) {
+      if (!rawText || rawText.length < 1 || rawText.length > 2000) {
         if (!translatePanel.classList.contains('show')) {
           hideIcon();
         }
         return;
       }
 
+      const text = reconstructParagraphs(rawText);
       currentSelectedText = text;
 
       getSettings((settings) => {
@@ -701,7 +764,7 @@
   function showPanel(x, y, text, engine, targetLang) {
     hideIcon();
     
-    const panelWidth = 360;
+    const panelWidth = translatePanel.offsetWidth || 360;
     const scrollX = window.scrollX || window.pageXOffset;
     const viewportRight = window.innerWidth + scrollX;
     const safeX = Math.max(scrollX + 10, Math.min(x, viewportRight - panelWidth - 20));
@@ -742,7 +805,13 @@
     panelModelSelect.innerHTML = '';
     
     if (AI_MODELS[engine]) {
-      const models = AI_MODELS[engine];
+      let models = AI_MODELS[engine];
+      // 划词翻译下拉框中：GLM 仅显示免费模型 (flash 免费系列)
+      if (engine === 'glm') {
+        const freeModels = models.filter(m => m.toLowerCase().includes('flash'));
+        models = freeModels.length > 0 ? freeModels : ['glm-4-flash', 'glm-4.5-flash', 'glm-4.7-flash', 'glm-4-flashx'];
+      }
+
       models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m;

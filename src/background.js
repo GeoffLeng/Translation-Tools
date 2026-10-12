@@ -19,8 +19,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.tabs.sendMessage(tab.id, {
       action: 'showSelectionTranslatePopup',
       text: info.selectionText
-    }).catch(err => {
-      console.warn('无法向内容脚本发送消息：', err);
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn('无法向内容脚本发送消息：', chrome.runtime.lastError.message);
+      }
     });
   } else if (info.menuItemId === 'openPdfInExtension' && tab.id) {
     const linkUrl = info.linkUrl;
@@ -34,16 +36,176 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// 2. 传统翻译服务逻辑
+// 请求超时包装器 (防止网络挂起)
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return res;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`请求超时 (${timeoutMs / 1000}s)`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 2. 传统与免 Key 翻译服务逻辑
 async function translateGoogle(text, targetLang) {
   const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url, {}, 10000);
   if (!res.ok) throw new Error(`Google API 错误: ${res.statusText}`);
   const data = await res.json();
   if (data && Array.isArray(data[0])) {
     return data[0].map(item => (item && item[0] ? item[0] : '')).join('');
   }
   throw new Error('Google 翻译没有返回有效内容');
+}
+
+// Bing 翻译 (免 Key·微软全球高速通道)
+let bingTokenCache = {
+  ig: '',
+  iid: '',
+  key: '',
+  token: '',
+  expiresAt: 0
+};
+
+async function getBingToken() {
+  const now = Date.now();
+  if (bingTokenCache.token && now < bingTokenCache.expiresAt) {
+    return bingTokenCache;
+  }
+
+  const res = await fetchWithTimeout('https://www.bing.com/translator', {}, 10000);
+  if (!res.ok) throw new Error('无法连接到 Bing 翻译服务');
+  const html = await res.text();
+
+  const igMatch = html.match(/IG:"([A-F0-9]+)"/i);
+  const iidMatch = html.match(/data-iid="([^"]+)"/i);
+  const tokenMatch = html.match(/var\s+params_AbusePreventionHelper\s*=\s*\[([0-9]+),\"([^\"]+)\"/);
+
+  if (!tokenMatch) throw new Error('解析 Bing 防刷令牌失败');
+
+  bingTokenCache = {
+    ig: igMatch ? igMatch[1] : '',
+    iid: iidMatch ? iidMatch[1] : 'translator.5028',
+    key: tokenMatch[1],
+    token: tokenMatch[2],
+    expiresAt: now + 15 * 60 * 1000 // 缓存 15 分钟
+  };
+  return bingTokenCache;
+}
+
+async function translateBing(text, targetLang) {
+  const langMap = {
+    'zh-CN': 'zh-Hans',
+    'en': 'en',
+    'ja': 'ja',
+    'ko': 'ko'
+  };
+  const to = langMap[targetLang] || targetLang;
+
+  let tokenInfo = await getBingToken();
+
+  const doReq = async (info) => {
+    const params = new URLSearchParams();
+    params.append('fromLang', 'auto-detect');
+    params.append('text', text);
+    params.append('to', to);
+    params.append('key', info.key);
+    params.append('token', info.token);
+
+    const url = `https://www.bing.com/ttranslatev3?isVertical=1&IG=${info.ig}&IID=${info.iid}`;
+    const res = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params.toString()
+    }, 10000);
+    if (!res.ok) throw new Error(`Bing 请求失败: HTTP ${res.status}`);
+    return await res.json();
+  };
+
+  let data = await doReq(tokenInfo);
+  if (!data || !data[0] || !data[0].translations) {
+    // 令牌失效则重置缓存重试
+    bingTokenCache.expiresAt = 0;
+    tokenInfo = await getBingToken();
+    data = await doReq(tokenInfo);
+  }
+
+  if (data && data[0] && data[0].translations && data[0].translations[0]) {
+    return data[0].translations[0].text;
+  }
+  throw new Error('Bing 翻译未能返回有效结果');
+}
+
+// DeepL 翻译 (支持免 Key 通道或官方 50万字符/月 免费 Key)
+async function translateDeepL(text, targetLang, apiKey, customEndpoint) {
+  const langMap = {
+    'zh-CN': 'ZH',
+    'en': 'EN-US',
+    'ja': 'JA',
+    'ko': 'KO'
+  };
+  const target = langMap[targetLang] || targetLang.toUpperCase();
+
+  // 若用户配置了官方 API Key
+  if (apiKey && apiKey.trim()) {
+    const key = apiKey.trim();
+    const isFree = key.endsWith(':fx');
+    const defaultEndpoint = isFree ? 'https://api-free.deepl.com/v2/translate' : 'https://api.deepl.com/v2/translate';
+    const endpoint = (customEndpoint && customEndpoint.trim()) ? customEndpoint.trim() : defaultEndpoint;
+
+    const res = await fetchWithTimeout(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `DeepL-Auth-Key ${key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: [text],
+        target_lang: target
+      })
+    }, 12000);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `DeepL API 错误: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (data.translations && data.translations[0]) {
+      return data.translations[0].text;
+    }
+    throw new Error('DeepL 未返回有效翻译文本');
+  }
+
+  // 免 Key 快捷通道 (DeepLX 协议兼容接口)
+  const endpoint = (customEndpoint && customEndpoint.trim()) ? customEndpoint.trim() : 'https://api.deeplx.org/translate';
+  const res = await fetchWithTimeout(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: text,
+      source_lang: 'auto',
+      target_lang: target
+    })
+  }, 12000);
+  if (!res.ok) {
+    throw new Error(`DeepL 免 Key 通道响应异常: HTTP ${res.status}。建议在设置中填入 DeepL 官方免费 API Key (每月50万字符免费)`);
+  }
+  const data = await res.json();
+  if (data.data) return data.data;
+  if (data.translations && data.translations[0]) return data.translations[0].text;
+  throw new Error('DeepL 接口返回数据格式异常');
 }
 
 // 计算 SHA256 签名 (用于有道智云 API v3 鉴权)
@@ -84,13 +246,13 @@ async function translateYoudao(text, targetLang, appKey, appSecret) {
     sign: sign
   });
 
-  const res = await fetch('https://openapi.youdao.com/api', {
+  const res = await fetchWithTimeout('https://openapi.youdao.com/api', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     },
     body: params.toString()
-  });
+  }, 10000);
 
   if (!res.ok) {
     throw new Error(`有道智云 HTTP 错误: ${res.status}`);
@@ -119,11 +281,11 @@ async function translateYoudao(text, targetLang, appKey, appSecret) {
 
 // 3. AI 翻译服务逻辑
 
-// Gemini 翻译
+// Google Gemini 官方接口翻译 (终身免费额度)
 async function translateGemini(text, targetLang, apiKey, modelName) {
   if (!apiKey) throw new Error('未配置 Gemini API Key，请在设置中配置');
-  const model = modelName || 'gemini-1.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const cleanModel = (modelName || 'gemini-2.0-flash').replace(/^models\//, '');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
   
   const prompt = `你是一个专业的翻译官。请将以下文本翻译为${langName}。如果输入内容已经是${langName}，则将其翻译为另一种语言（如中英互译）。
@@ -131,13 +293,13 @@ async function translateGemini(text, targetLang, apiKey, modelName) {
 待翻译文本如下：
 ${text}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }]
     })
-  });
+  }, 20000);
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
@@ -151,19 +313,23 @@ ${text}`;
   throw new Error('Gemini 没有返回有效翻译内容');
 }
 
-// OpenAI 兼容 API 翻译 (适用于 OpenAI, DeepSeek, Kimi, GLM, 豆包, 自定义等)
+// OpenAI 兼容 API 翻译 (适用于 智谱 GLM, DeepSeek, OpenRouter, OpenCode, 硅基流动, Groq, 自定义模型等)
 async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, modelName) {
   if (!apiKey) throw new Error('该服务未配置 API Key，请在设置中配置');
   if (!endpoint) throw new Error('接口地址未配置');
 
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
   
-  const res = await fetch(endpoint, {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+    'HTTP-Referer': 'https://github.com/GeoffLeng/Translation-Tools',
+    'X-Title': 'Lite Translate'
+  };
+
+  const res = await fetchWithTimeout(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
+    headers: headers,
     body: JSON.stringify({
       model: modelName,
       messages: [
@@ -178,7 +344,7 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
       ],
       temperature: 0.3
     })
-  });
+  }, 25000);
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
@@ -186,106 +352,252 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
   }
 
   const data = await res.json();
-  if (data.choices && data.choices[0]?.message?.content) {
-    return data.choices[0].message.content.trim();
+  const choice = data.choices && data.choices[0];
+  if (choice) {
+    const content = choice.message?.content;
+    if (typeof content === 'string' && content.trim()) {
+      return content.trim();
+    }
+    if (Array.isArray(content)) {
+      const merged = content.map(part => (part && part.text) ? part.text : '').join('').trim();
+      if (merged) return merged;
+    }
+    if (choice.text && typeof choice.text === 'string' && choice.text.trim()) {
+      return choice.text.trim();
+    }
   }
-  throw new Error('API 没有返回有效的 Content 内容');
+  throw new Error('API 没有返回有效的翻译文本内容');
 }
 
-// Claude 官方接口翻译
-async function translateClaude(text, targetLang, apiKey, modelName, customEndpoint) {
-  if (!apiKey) throw new Error('未配置 Claude API Key，请在设置中配置');
-  const url = customEndpoint || 'https://api.anthropic.com/v1/messages';
-  const model = modelName || 'claude-3-5-haiku-latest';
-  const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
-  
-  const prompt = `你是一个专业的翻译官。请将以下文本翻译为${langName}。如果输入内容已经是${langName}，则将其翻译为另一种语言（如中英互译）。
-请直接输出翻译结果，不要包含任何解释、前导词、说明或标点：\n\n${text}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: model,
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Claude API 错误: ${res.status}`);
+// 辅助：从 Chat Endpoint 推导 Models Endpoint
+function deriveModelsUrl(endpoint, fallbackUrl) {
+  let url = (endpoint && endpoint.trim()) ? endpoint.trim() : fallbackUrl;
+  if (!url) return '';
+  const [base, query] = url.split('?');
+  let cleanBase = base.replace(/\/+$/, '');
+  if (cleanBase.endsWith('/chat/completions')) {
+    cleanBase = cleanBase.replace(/\/chat\/completions$/, '/models');
+  } else if (cleanBase.endsWith('/completions')) {
+    cleanBase = cleanBase.replace(/\/completions$/, '/models');
+  } else if (cleanBase.endsWith('/messages')) {
+    cleanBase = cleanBase.replace(/\/messages$/, '/models');
+  } else if (!cleanBase.includes('/models')) {
+    cleanBase = cleanBase + '/models';
   }
-
-  const data = await res.json();
-  if (data.content && data.content[0]) {
-    return data.content[0].text.trim();
-  }
-  throw new Error('Claude 没有返回有效内容');
+  return query ? `${cleanBase}?${query}` : cleanBase;
 }
 
-// 4. 监听 runtime 消息
+// 4. 服务商可用模型获取逻辑
+async function fetchProviderModels(provider, apiKey, customEndpoint) {
+  if (!apiKey) throw new Error('请先输入有效的 API Key');
+
+  const defaultHeaders = {
+    'Authorization': `Bearer ${apiKey}`,
+    'HTTP-Referer': 'https://github.com/GeoffLeng/Translation-Tools',
+    'X-Title': 'Lite Translate'
+  };
+
+  // 1) 智谱 GLM（4/4.5/4.7 flash 免费）
+  if (provider === 'glm') {
+    const res = await fetchWithTimeout('https://open.bigmodel.cn/api/paas/v4/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    }, 12000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `智谱 GLM 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const fetchedList = (data.data && Array.isArray(data.data)) ? data.data.map(m => m.id) : [];
+
+    // 官方核心免费 Flash 模型集合（确保完整包含并优先置顶）
+    const freeFlashModels = ['glm-4-flash', 'glm-4.5-flash', 'glm-4.7-flash', 'glm-4-flashx'];
+    const mergedList = [...freeFlashModels];
+    fetchedList.forEach(id => {
+      if (!mergedList.includes(id)) mergedList.push(id);
+    });
+
+    return mergedList.map(id => {
+      const isFree = freeFlashModels.includes(id) || id.toLowerCase().includes('flash');
+      return {
+        id: id,
+        name: isFree ? `${id} (免费)` : id,
+        isFree: isFree
+      };
+    });
+  }
+
+  // 2) Google Gemini (终身免费额度)
+  if (provider === 'gemini') {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const res = await fetchWithTimeout(url, {}, 12000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Gemini 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.models || !Array.isArray(data.models)) throw new Error('Gemini 未返回模型列表');
+    return data.models
+      .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => m.name.replace(/^models\//, ''))
+      .filter(id => !id.includes('embedding') && !id.includes('aqa'));
+  }
+
+  // 3) DeepSeek (官方预置)
+  if (provider === 'deepseek') {
+    const res = await fetchWithTimeout('https://api.deepseek.com/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    }, 12000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `DeepSeek 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.data || !Array.isArray(data.data)) throw new Error('DeepSeek 未返回模型列表');
+    return data.data.map(m => m.id);
+  }
+
+  // 4) OpenRouter
+  if (provider === 'openrouter') {
+    const res = await fetchWithTimeout('https://openrouter.ai/api/v1/models', {
+      headers: defaultHeaders
+    }, 15000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `OpenRouter 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.data || !Array.isArray(data.data)) throw new Error('OpenRouter 未返回模型列表');
+    return data.data.map(m => ({
+      id: m.id,
+      name: m.name || m.id
+    }));
+  }
+
+  // 5) OpenCode
+  if (provider === 'opencode') {
+    const url = deriveModelsUrl(customEndpoint, 'https://api.opencode.ai/v1/models');
+    const res = await fetchWithTimeout(url, { headers: defaultHeaders }, 15000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `OpenCode 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const list = data.data || data.models || [];
+    if (!Array.isArray(list)) throw new Error('OpenCode 未返回模型列表');
+    return list.map(m => typeof m === 'string' ? { id: m, name: m } : { id: m.id, name: m.name || m.id });
+  }
+
+  // 6) OpenAI
+  if (provider === 'openai') {
+    const url = deriveModelsUrl(customEndpoint, 'https://api.openai.com/v1/models');
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${apiKey}` } }, 15000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `OpenAI 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.data || !Array.isArray(data.data)) throw new Error('OpenAI 未返回模型列表');
+    const filtered = data.data.filter(m => {
+      const lower = m.id.toLowerCase();
+      return !lower.includes('embedding') && !lower.includes('whisper') && !lower.includes('tts') && !lower.includes('dall-e');
+    });
+    return filtered.map(m => ({ id: m.id, name: m.name || m.id }));
+  }
+
+  // 7) 硅基流动 SiliconFlow
+  if (provider === 'siliconflow') {
+    const url = deriveModelsUrl(customEndpoint, 'https://api.siliconflow.cn/v1/models');
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${apiKey}` } }, 15000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `SiliconFlow 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const list = data.data || data.models || [];
+    if (!Array.isArray(list)) throw new Error('SiliconFlow 未返回模型列表');
+    return list.map(m => typeof m === 'string' ? { id: m, name: m } : { id: m.id, name: m.name || m.id });
+  }
+
+  // 8) Groq
+  if (provider === 'groq') {
+    const url = deriveModelsUrl(customEndpoint, 'https://api.groq.com/openai/v1/models');
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${apiKey}` } }, 15000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Groq 请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const list = data.data || data.models || [];
+    if (!Array.isArray(list)) throw new Error('Groq 未返回模型列表');
+    return list.map(m => typeof m === 'string' ? { id: m, name: m } : { id: m.id, name: m.name || m.id });
+  }
+
+  // 9) 通用自定义 OpenAI 兼容接口 / 本地 Ollama
+  if (provider === 'custom') {
+    const url = deriveModelsUrl(customEndpoint, '');
+    if (!url) throw new Error('请先填写接口地址以获取受支持模型');
+    const res = await fetchWithTimeout(url, { headers: defaultHeaders }, 15000);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `自定义端点请求失败: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    const list = data.data || data.models || (Array.isArray(data) ? data : []);
+    if (!Array.isArray(list) || list.length === 0) throw new Error('未在端点检测到有效模型列表');
+    return list.map(m => typeof m === 'string' ? { id: m, name: m } : { id: m.id, name: m.name || m.id });
+  }
+
+  throw new Error('不支持的服务商: ' + provider);
+}
+
+// 5. 监听 runtime 消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'fetchModels') {
+    const { provider, apiKey, endpoint } = request;
+    fetchProviderModels(provider, apiKey, endpoint)
+      .then(models => {
+        sendResponse({ success: true, models });
+      })
+      .catch(err => {
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
   if (request.action === 'translate') {
     const { text, engine, targetLang, model } = request;
 
-    // 读取所有 API 配置与偏好模型
+    // 读取 API 配置与偏好模型
     chrome.storage.local.get({
-      geminiApiKey: '',
-      geminiActiveModel: 'gemini-1.5-flash',
-      openaiApiKey: '',
-      openaiActiveModel: 'gpt-4o-mini',
-      openaiEndpoint: 'https://api.openai.com/v1/chat/completions',
-      claudeApiKey: '',
-      claudeActiveModel: 'claude-3-5-haiku-latest',
-      claudeEndpoint: 'https://api.anthropic.com/v1/messages',
-      deepseekApiKey: '',
-      deepseekActiveModel: 'deepseek-chat',
-      kimiApiKey: '',
-      kimiActiveModel: 'moonshot-v1-8k',
       glmApiKey: '',
       glmActiveModel: 'glm-4-flash',
-      doubaoApiKey: '',
-      doubaoModel: '',
-      doubaoEndpoint: '',
-      nvidiaApiKey: '',
-      nvidiaActiveModel: 'meta/llama-3.1-8b-instruct',
-      nvidiaEndpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+      geminiApiKey: '',
+      geminiActiveModel: 'gemini-2.0-flash',
+      deepseekApiKey: '',
+      deepseekActiveModel: 'deepseek-chat',
+      deeplApiKey: '',
+      deeplEndpoint: '',
       youdaoAppKey: '',
       youdaoAppSecret: '',
       customModels: []
     }, (settings) => {
       let translationPromise;
 
-      // 根据选中的引擎派发请求 (未传 model 时采用用户设定或低成本推荐模型)
       if (engine === 'google') {
         translationPromise = translateGoogle(text, targetLang);
-      } else if (engine === 'youdao') {
-        translationPromise = translateYoudao(text, targetLang, settings.youdaoAppKey, settings.youdaoAppSecret);
-      } else if (engine === 'gemini') {
-        translationPromise = translateGemini(text, targetLang, settings.geminiApiKey, model || settings.geminiActiveModel || 'gemini-1.5-flash');
-      } else if (engine === 'openai') {
-        translationPromise = translateOpenAICompatible(text, targetLang, settings.openaiApiKey, settings.openaiEndpoint, model || settings.openaiActiveModel || 'gpt-4o-mini');
-      } else if (engine === 'claude') {
-        translationPromise = translateClaude(text, targetLang, settings.claudeApiKey, model || settings.claudeActiveModel || 'claude-3-5-haiku-latest', settings.claudeEndpoint);
-      } else if (engine === 'deepseek') {
-        translationPromise = translateOpenAICompatible(text, targetLang, settings.deepseekApiKey, 'https://api.deepseek.com/chat/completions', model || settings.deepseekActiveModel || 'deepseek-chat');
-      } else if (engine === 'kimi') {
-        translationPromise = translateOpenAICompatible(text, targetLang, settings.kimiApiKey, 'https://api.moonshot.cn/v1/chat/completions', model || settings.kimiActiveModel || 'moonshot-v1-8k');
+      } else if (engine === 'bing') {
+        translationPromise = translateBing(text, targetLang);
+      } else if (engine === 'deepl') {
+        translationPromise = translateDeepL(text, targetLang, settings.deeplApiKey, settings.deeplEndpoint);
       } else if (engine === 'glm') {
         translationPromise = translateOpenAICompatible(text, targetLang, settings.glmApiKey, 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model || settings.glmActiveModel || 'glm-4-flash');
-      } else if (engine === 'doubao') {
-        const doubaoActiveModel = (model && model !== '未配置 Endpoint ID') ? model : (settings.doubaoModel || 'doubao-lite-4k');
-        translationPromise = translateOpenAICompatible(text, targetLang, settings.doubaoApiKey, settings.doubaoEndpoint || 'https://ark.cn-beijing.volces.com/api/v3/chat/completions', doubaoActiveModel);
-      } else if (engine === 'nvidia') {
-        translationPromise = translateOpenAICompatible(text, targetLang, settings.nvidiaApiKey, settings.nvidiaEndpoint || 'https://integrate.api.nvidia.com/v1/chat/completions', model || settings.nvidiaActiveModel || 'meta/llama-3.1-8b-instruct');
-      } else if (engine.startsWith('custom_')) {
-        // 自定义模型查表
+      } else if (engine === 'gemini') {
+        translationPromise = translateGemini(text, targetLang, settings.geminiApiKey, model || settings.geminiActiveModel || 'gemini-2.0-flash');
+      } else if (engine === 'deepseek') {
+        translationPromise = translateOpenAICompatible(text, targetLang, settings.deepseekApiKey, 'https://api.deepseek.com/chat/completions', model || settings.deepseekActiveModel || 'deepseek-chat');
+      } else if (engine === 'youdao') {
+        translationPromise = translateYoudao(text, targetLang, settings.youdaoAppKey, settings.youdaoAppSecret);
+      } else if (engine && engine.startsWith('custom_')) {
         const customId = engine.substring(7); // "custom_" 长度为 7
         const customModel = settings.customModels.find(m => m.id === customId);
         if (customModel) {
@@ -297,7 +609,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         translationPromise = Promise.reject(new Error('未支持的引擎：' + engine));
       }
 
-      translationPromise
+      Promise.resolve(translationPromise)
         .then(translation => {
           sendResponse({ success: true, translation });
         })
@@ -309,3 +621,5 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // 异步支持
   }
 });
+
+
