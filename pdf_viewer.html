@@ -11,20 +11,10 @@
     <header class="viewer-toolbar">
       <div class="toolbar-left">
         <img src="/icons/icon.svg" class="toolbar-logo" alt="logo">
-        <span class="file-name" id="pdf-title">请选择或拖入 PDF 文件...</span>
+        <span class="file-name" id="pdf-title" title="请选择或拖入 PDF 文件...">请选择或拖入 PDF 文件...</span>
       </div>
 
       <div class="toolbar-center">
-        <button id="prev-page" class="toolbar-btn" disabled title="上一页">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
-        </button>
-        <span class="page-indicator">
-          <input type="number" id="page-num" value="1" min="1" class="page-input"> / <span id="page-count">0</span>
-        </span>
-        <button id="next-page" class="toolbar-btn" disabled title="下一页">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
-        </button>
-        <div class="divider"></div>
         <button id="zoom-out" class="toolbar-btn" title="缩小">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
         </button>
@@ -37,9 +27,10 @@
       <!-- Translation Tools & Document Actions -->
       <div class="toolbar-right">
         <div class="translation-controls">
-          <select id="pdf-translate-engine" class="toolbar-select" title="选择一键翻译引擎 (默认谷歌)">
+          <select id="pdf-translate-engine" class="toolbar-select" title="选择一键翻译引擎">
             <option value="google">Google 翻译 (免Key)</option>
           </select>
+          <select id="pdf-translate-model" class="toolbar-select hidden" title="选择具体 AI 模型"></select>
 
           <label class="toolbar-checkbox" title="勾选后公式与数学符号原样保留，不进行翻译">
             <input type="checkbox" id="skip-formulas" checked>
@@ -79,31 +70,57 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line><line x1="9" y1="11" x2="15" y2="11"></line><line x1="9" y1="19" x2="13" y2="19"></line></svg>
           </div>
           <h2>开启智能阅读对照翻译</h2>
-          <p>请点击右上角按钮打开本地 PDF 文件，或者将 PDF 拖曳至此。支持一键翻译当前页、一键翻译全文、左右双栏对照及公式/图表精准保护识别。</p>
+          <p>请点击右上角按钮打开本地 PDF 文件，或者将 PDF 拖曳至此。支持原PDF排版左右镜像对照翻译、一键翻译全文及公式/图表精准保护识别。</p>
         </div>
       </div>
 
       <!-- Split Workspace -->
       <div class="viewer-workspace" id="viewer-workspace">
-        <!-- Left: PDF Canvas & Text Layer -->
-        <div class="pdf-pane" id="pdf-pane">
+        <!-- Left: Original PDF Canvas & Text Layer -->
+        <div class="pdf-pane pdf-pane-orig" id="pdf-pane">
+          <div class="pane-column-banner">
+            <span class="pane-banner-tag">原文 PDF</span>
+          </div>
           <div id="pdf-viewer-container" class="pdf-viewer-container hidden">
-            <!-- Rendered pages will be appended here -->
+            <!-- Rendered original pages will be appended here -->
           </div>
         </div>
 
-        <!-- Right: Parallel Bilingual Translation Pane -->
-        <aside class="translation-pane hidden" id="translation-pane">
+        <!-- Right: Layout-Preserving Translated PDF Pane -->
+        <div class="pdf-pane pdf-pane-trans hidden" id="translation-pane">
           <div class="trans-pane-header">
             <div class="trans-pane-title">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
-              <span>左右对照译文</span>
+              <span>原排版译文 PDF</span>
               <span id="trans-active-badge" class="trans-active-badge">未翻译</span>
             </div>
             <div class="trans-pane-actions">
+              <!-- Font size scaling -->
+              <div class="trans-font-adjust-group" title="译文字号微调">
+                <button id="trans-font-dec-btn" class="trans-icon-btn font-size-btn" title="缩小译文字号">A-</button>
+                <span id="trans-font-scale-text" class="font-scale-text">100%</span>
+                <button id="trans-font-inc-btn" class="trans-icon-btn font-size-btn" title="放大译文字号">A+</button>
+              </div>
+
+              <!-- Opacity toggle -->
+              <button id="toggle-trans-opacity-btn" class="trans-icon-btn" title="切换译文底色透明度 (或长按 Alt 键随时透视原图)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v18"></path><path d="M12 8l4.5 4.5M12 13l3.5 3.5"></path></svg>
+              </button>
+
+              <!-- Persistent Peek Lock Toggle -->
+              <button id="toggle-trans-peek-btn" class="trans-icon-btn" title="常驻透视原图 (点击锁定/解除，或长按 Alt 键)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              </button>
+
               <button id="copy-all-trans-btn" class="trans-icon-btn" title="复制全部译文">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
               </button>
+
+              <!-- Export Bilingual Document -->
+              <button id="export-bilingual-btn" class="trans-icon-btn" title="导出离线双语对照网页 (可打印/另存为PDF)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </button>
+
               <button id="close-trans-pane-btn" class="trans-icon-btn" title="收起对照栏">✕</button>
             </div>
           </div>
@@ -119,19 +136,42 @@
             </div>
           </div>
 
-          <!-- Scrollable Bilingual Content List -->
-          <div class="trans-pane-content" id="trans-pane-content">
-            <div class="trans-empty-state">
-              <p>请点击顶部“翻译当前页”或“一键翻译全文”启动双栏对照翻译</p>
-            </div>
+          <!-- Scanned PDF Detection Alert Banner -->
+          <div id="scanned-pdf-alert" class="scanned-pdf-alert hidden">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <span class="scanned-alert-text">检测到当前页面为扫描件/纯图片 PDF（无可选文本层），暂无法提取文字。建议先转为可检索 PDF。</span>
+            <button id="dismiss-scanned-alert" class="scanned-alert-close">✕</button>
           </div>
-        </aside>
+
+          <!-- Mirrored PDF Pages with Translated Text Overlay -->
+          <div id="pdf-viewer-container-trans" class="pdf-viewer-container">
+            <!-- Rendered mirrored translated pages will be appended here -->
+          </div>
+        </div>
       </div>
+
+      <!-- Floating Bottom Pagination Bar -->
+      <nav class="bottom-pagination-bar" id="bottom-pagination-bar">
+        <button id="prev-page" class="pagination-btn" disabled title="上一页">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          <span>上一页</span>
+        </button>
+        <div class="pagination-indicator">
+          <span>第</span>
+          <input type="number" id="page-num" value="1" min="1" class="page-input">
+          <span>/</span>
+          <span id="page-count">0</span>
+          <span>页</span>
+        </div>
+        <button id="next-page" class="pagination-btn" disabled title="下一页">
+          <span>下一页</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+      </nav>
 
       <div id="loading-overlay" class="loading-overlay hidden">
         <div class="spinner"></div>
         <p id="loading-status">正在加载 PDF 文件...</p>
-      </div>
     </main>
   </div>
   <script type="module" src="/src/pdf_viewer.js"></script>

@@ -385,9 +385,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // 免 Key 免费翻译引擎组
     const available = [
       { value: 'google', label: 'Google 翻译 (免 Key)' },
-      { value: 'bing', label: 'Bing 翻译 (免 Key·微软)' },
-      { value: 'deepl', label: 'DeepL 翻译 (精准自然·100万额度/自建)' }
+      { value: 'bing', label: 'Bing 翻译 (免 Key·微软)' }
     ];
+
+    // DeepL 翻译 (仅在配置了 Auth Key 或 自定义 Endpoint 时显示)
+    if ((deeplApiKey && deeplApiKey.value.trim()) || (deeplEndpoint && deeplEndpoint.value.trim())) {
+      available.push({ value: 'deepl', label: 'DeepL 翻译 (精准自然)' });
+    }
 
     // 智谱 GLM（4/4.5/4.7 flash 免费）
     if (glmApiKey && glmApiKey.value.trim()) {
@@ -400,9 +404,11 @@ document.addEventListener('DOMContentLoaded', () => {
       available.push({ value: 'youdao', label: '有道智云 (官方词典 API)' });
     }
 
-    // 自定义模型
+    // 自定义模型 (仅在已配置 API Key 或 Endpoint 时显示)
     customModels.forEach(m => {
-      available.push({ value: `custom_${m.id}`, label: `${m.name} (${m.modelName})` });
+      if ((m.apiKey && m.apiKey.trim()) || (m.endpoint && m.endpoint.trim())) {
+        available.push({ value: `custom_${m.id}`, label: `${m.name} (${m.modelName})` });
+      }
     });
 
     available.forEach(item => {

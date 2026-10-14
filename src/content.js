@@ -633,19 +633,23 @@
 
       const available = [
         { value: 'google', label: 'Google' },
-        { value: 'bing', label: 'Bing' },
-        { value: 'deepl', label: 'DeepL' }
+        { value: 'bing', label: 'Bing' }
       ];
 
-      if (result.glmApiKey) {
+      if ((result.deeplApiKey && result.deeplApiKey.trim()) || (result.deeplEndpoint && result.deeplEndpoint.trim())) {
+        available.push({ value: 'deepl', label: 'DeepL' });
+      }
+      if (result.glmApiKey && result.glmApiKey.trim()) {
         available.push({ value: 'glm', label: '智谱GLM' });
       }
-      if (result.youdaoAppKey && result.youdaoAppSecret) {
+      if (result.youdaoAppKey && result.youdaoAppSecret && result.youdaoAppKey.trim() && result.youdaoAppSecret.trim()) {
         available.push({ value: 'youdao', label: '有道' });
       }
 
       result.customModels.forEach(m => {
-        available.push({ value: `custom_${m.id}`, label: m.name });
+        if ((m.apiKey && m.apiKey.trim()) || (m.endpoint && m.endpoint.trim())) {
+          available.push({ value: `custom_${m.id}`, label: m.name });
+        }
       });
 
       available.forEach(item => {
