@@ -279,7 +279,7 @@ body {
 
 .pdf-pane-trans #pdf-viewer-container-trans {
   flex: 1;
-  overflow-y: auto;
+  overflow-y: hidden;
   overflow-x: auto;
   padding: 16px 12px 85px 12px;
   display: flex;

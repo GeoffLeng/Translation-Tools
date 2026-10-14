@@ -918,68 +918,56 @@ document.addEventListener('DOMContentLoaded', () => {
       targetLeft.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (viewerContainerTrans && !translationPane.classList.contains('hidden')) {
-      alignTransPaneToPage(currentPage);
-      ensurePageTransMounted(currentPage, currentRenderId);
+      ensurePageTransMounted(currentPage, currentRenderId).then(() => {
+        syncTransPanePosition();
+      });
     }
   }
 
-  // 精准将右侧对照镜像容器滚动对齐到当前页（消除左右滚动绝对偏差）
-  function alignTransPaneToPage(pageNum) {
+  // 精准将右侧对照镜像容器滚动对齐到当前阅读页（单向同步，绝对不干扰左栏原文滚动）
+  function syncTransPanePosition() {
+    if (!translationPane || translationPane.classList.contains('hidden')) return;
     if (!viewerContainerTrans || !pdfPane) return;
-    const targetTrans = viewerContainerTrans.querySelector(`.page-container[data-page-num="${pageNum}"]`);
-    const targetOrig = viewerContainer.querySelector(`.page-container[data-page-num="${pageNum}"]`);
 
-    if (targetTrans && targetOrig) {
-      // 保持左右两侧页面在视口顶部的相对偏移完全一致
+    const targetOrig = viewerContainer.querySelector(`.page-container[data-page-num="${currentPage}"]`);
+    const targetTrans = viewerContainerTrans.querySelector(`.page-container[data-page-num="${currentPage}"]`);
+
+    if (targetOrig && targetTrans) {
       const origRect = targetOrig.getBoundingClientRect();
       const paneRect = pdfPane.getBoundingClientRect();
       const relativeTop = origRect.top - paneRect.top;
 
-      const transOffset = targetTrans.offsetTop - relativeTop;
-      viewerContainerTrans.scrollTop = Math.max(0, transOffset);
-    } else if (targetTrans) {
-      targetTrans.scrollIntoView({ behavior: 'auto', block: 'start' });
-    } else {
-      const maxScrollLeft = pdfPane.scrollHeight - pdfPane.clientHeight;
-      const maxScrollRight = viewerContainerTrans.scrollHeight - viewerContainerTrans.clientHeight;
-      if (maxScrollLeft > 0 && maxScrollRight > 0) {
-        viewerContainerTrans.scrollTop = (pdfPane.scrollTop / maxScrollLeft) * maxScrollRight;
+      const transRect = targetTrans.getBoundingClientRect();
+      const transContainerRect = viewerContainerTrans.getBoundingClientRect();
+      const currentRelativeTop = transRect.top - transContainerRect.top;
+
+      const diff = currentRelativeTop - relativeTop;
+      if (Math.abs(diff) > 0.5) {
+        viewerContainerTrans.scrollTop += diff;
       }
     }
   }
 
-  // 左右双栏无锁防抖同步滚动
-  let isSyncingScroll = false;
+  // 左右双栏统一滚动同步体系（单向数据流 Single Source of Truth，彻底杜绝跳页反向震荡）
   function setupTwinScrollSync() {
     if (!pdfPane || !viewerContainerTrans) return;
 
+    // 1. 左栏为主滚动源：左栏滚动时，实时驱动右栏进行高精度视口对齐
     pdfPane.addEventListener('scroll', () => {
-      if (isSyncingScroll || translationPane.classList.contains('hidden')) return;
-      isSyncingScroll = true;
-      requestAnimationFrame(() => {
-        const maxScrollLeft = pdfPane.scrollHeight - pdfPane.clientHeight;
-        const maxScrollRight = viewerContainerTrans.scrollHeight - viewerContainerTrans.clientHeight;
-        if (maxScrollLeft > 0 && maxScrollRight > 0) {
-          const ratio = pdfPane.scrollTop / maxScrollLeft;
-          viewerContainerTrans.scrollTop = ratio * maxScrollRight;
-        }
-        isSyncingScroll = false;
-      });
+      syncTransPanePosition();
     }, { passive: true });
 
-    viewerContainerTrans.addEventListener('scroll', () => {
-      if (isSyncingScroll || translationPane.classList.contains('hidden')) return;
-      isSyncingScroll = true;
-      requestAnimationFrame(() => {
-        const maxScrollLeft = pdfPane.scrollHeight - pdfPane.clientHeight;
-        const maxScrollRight = viewerContainerTrans.scrollHeight - viewerContainerTrans.clientHeight;
-        if (maxScrollLeft > 0 && maxScrollRight > 0) {
-          const ratio = viewerContainerTrans.scrollTop / maxScrollRight;
-          pdfPane.scrollTop = ratio * maxScrollLeft;
+    // 2. 右栏滚轮穿透：在右侧对照栏内滚动滚轮时，直接驱动主视口（绝不计算不可靠比例，绝不反向拉扯）
+    if (translationPane) {
+      translationPane.addEventListener('wheel', (e) => {
+        const block = e.target.closest ? e.target.closest('.trans-overlay-block') : null;
+        if (block && block.scrollHeight > block.clientHeight) {
+          return;
         }
-        isSyncingScroll = false;
-      });
-    }, { passive: true });
+        pdfPane.scrollTop += e.deltaY;
+        e.preventDefault();
+      }, { passive: false });
+    }
   }
 
   // 专门确保右侧对照栏指定页面完整挂载底图 Canvas 与 trans-overlay-layer
@@ -991,8 +979,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let canvasTrans = pageContainerTrans.querySelector('canvas');
     let transOverlay = pageContainerTrans.querySelector('.trans-overlay-layer');
 
-    // 如果已经挂载且有 canvas，直接复用
-    if (canvasTrans && transOverlay && !pageContainerTrans.classList.contains('is-unloaded')) {
+    // 如果已经挂载且有有效的 canvas，直接复用
+    if (canvasTrans && transOverlay && !pageContainerTrans.classList.contains('is-unloaded') && canvasTrans.width > 0) {
       return { pageContainerTrans, canvasTrans, transOverlay };
     }
 
@@ -1009,15 +997,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!canvasTrans) {
         canvasTrans = document.createElement('canvas');
-        canvasTrans.width = wPx;
-        canvasTrans.height = hPx;
       }
+      canvasTrans.width = wPx;
+      canvasTrans.height = hPx;
       const ctxTrans = canvasTrans.getContext('2d');
 
       // 核心性能与稳定性突破：优先从左侧已渲染的 canvas 直接克隆画面，0延时、极速硬件级呈现且绝不与 PDF.js 冲突
       const pageContainerLeft = viewerContainer.querySelector(`.page-container[data-page-num="${pageNum}"]`);
       const leftCanvas = pageContainerLeft ? pageContainerLeft.querySelector('canvas') : null;
-      if (leftCanvas && leftCanvas.width > 0 && leftCanvas.height > 0) {
+      if (leftCanvas && leftCanvas.width === wPx && leftCanvas.height === hPx) {
         ctxTrans.drawImage(leftCanvas, 0, 0);
       } else {
         await page.render({ canvasContext: ctxTrans, viewport: viewport }).promise;
@@ -1125,6 +1113,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 移出视口卸载回收内存
   function unmountPage(pageNum) {
+    // 关键安全防线：绝对严禁卸载当前正在阅读的页面、以及用户已耗费资源翻译好的页面！
+    if (pageNum === currentPage || pageTranslations.has(pageNum)) {
+      return;
+    }
+
     const pageState = renderedPages.get(pageNum);
     if (!pageState || !pageState.isRendered) return;
 
@@ -1821,29 +1814,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // 7. 翻译单页核心方法 (原排版左右镜像对照翻译)
   async function translatePage(pageNum, isBatch = false) {
     if (!currentPdf) return;
-    const page = await currentPdf.getPage(pageNum);
+    const targetPageNum = pageNum || currentPage;
+    const page = await currentPdf.getPage(targetPageNum);
     const skipFormulas = skipFormulasCheckbox ? skipFormulasCheckbox.checked : true;
 
     // 1. 展开并显示右侧排版对照栏
     translationPane.classList.remove('hidden');
     toggleBilingualBtn.classList.add('active');
-    transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${pageNum} 页`;
+    transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页`;
 
-    // 2. 关键修复：立即对齐滚动位置并挂载右侧镜像底图，确保用户瞬间看到与左侧对齐的PDF
-    alignTransPaneToPage(pageNum);
-    const transMount = await ensurePageTransMounted(pageNum, currentRenderId);
-
-    // 再次对齐滚动，防止容器挂载展开后高度变动引发偏差
-    alignTransPaneToPage(pageNum);
-
-    const pageContainerTrans = transMount ? transMount.pageContainerTrans : (viewerContainerTrans ? viewerContainerTrans.querySelector(`.page-container[data-page-num="${pageNum}"]`) : null);
-    let overlayLayer = transMount ? transMount.transOverlay : (pageContainerTrans ? pageContainerTrans.querySelector('.trans-overlay-layer') : null);
-
-    if (pageContainerTrans && !overlayLayer) {
-      overlayLayer = document.createElement('div');
-      overlayLayer.className = 'trans-overlay-layer';
-      pageContainerTrans.appendChild(overlayLayer);
+    // 2. 关键：确保右侧镜像页面底图Canvas和图层已挂载（瞬间呈现，绝不白屏/空灰屏）
+    const transMount = await ensurePageTransMounted(targetPageNum, currentRenderId);
+    if (!transMount) {
+      console.error(`挂载第 ${targetPageNum} 页右侧镜像失败`);
+      return;
     }
+
+    // 3. 对齐视口位置（仅单向驱动右栏，绝不反向拉扯左栏导致跳页）
+    syncTransPanePosition();
+
+    const { pageContainerTrans, transOverlay } = transMount;
+    let overlayLayer = transOverlay;
 
     const viewport = page.getViewport({ scale: 1.0 });
     const pageHeight = viewport.height;
@@ -2049,8 +2040,9 @@ document.addEventListener('DOMContentLoaded', () => {
       translationPane.classList.toggle('hidden', !willBeVisible);
       toggleBilingualBtn.classList.toggle('active', willBeVisible);
       if (willBeVisible) {
-        alignTransPaneToPage(currentPage);
-        ensurePageTransMounted(currentPage, currentRenderId);
+        ensurePageTransMounted(currentPage, currentRenderId).then(() => {
+          syncTransPanePosition();
+        });
       }
     });
   }
