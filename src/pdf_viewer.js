@@ -35,17 +35,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const translateDocBtn = document.getElementById('translate-doc-btn');
   const toggleBilingualBtn = document.getElementById('toggle-bilingual-btn');
   const translationPane = document.getElementById('translation-pane');
+  const transToolbarActions = document.getElementById('trans-toolbar-actions');
   const transActiveBadge = document.getElementById('trans-active-badge');
   const transProgressCard = document.getElementById('trans-progress-card');
   const transProgressLabel = document.getElementById('trans-progress-label');
   const transProgressFill = document.getElementById('trans-progress-fill');
   const cancelTransBtn = document.getElementById('cancel-trans-btn');
   const copyAllTransBtn = document.getElementById('copy-all-trans-btn');
-  const closeTransPaneBtn = document.getElementById('close-trans-pane-btn');
-  const transFontDecBtn = document.getElementById('trans-font-dec-btn');
-  const transFontScaleText = document.getElementById('trans-font-scale-text');
-  const transFontIncBtn = document.getElementById('trans-font-inc-btn');
-  const toggleTransOpacityBtn = document.getElementById('toggle-trans-opacity-btn');
   const toggleTransPeekBtn = document.getElementById('toggle-trans-peek-btn');
   const exportBilingualBtn = document.getElementById('export-bilingual-btn');
   const scannedPdfAlert = document.getElementById('scanned-pdf-alert');
@@ -807,9 +803,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const defaultW = Math.round(firstViewport.width);
       const defaultH = Math.round(firstViewport.height);
 
-      // 高效批量创建左右两侧空容器占位（仅轻量 DOM 骨架，无 Canvas 纹理开销）
+      // 高效批量创建左侧原文空容器占位（仅轻量 DOM 骨架，无 Canvas 纹理开销）
       const fragment = document.createDocumentFragment();
-      const fragmentTrans = document.createDocumentFragment();
 
       for (let i = 1; i <= currentPdf.numPages; i++) {
         const pageContainer = document.createElement('div');
@@ -819,25 +814,18 @@ document.addEventListener('DOMContentLoaded', () => {
         pageContainer.style.height = `${defaultH}px`;
         pageContainer.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${i} 页 原文</span></div>`;
         fragment.appendChild(pageContainer);
-
-        const pageContainerTrans = document.createElement('div');
-        pageContainerTrans.className = 'page-container is-unloaded';
-        pageContainerTrans.dataset.pageNum = i;
-        pageContainerTrans.style.width = `${defaultW}px`;
-        pageContainerTrans.style.height = `${defaultH}px`;
-        pageContainerTrans.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${i} 页 译文</span></div>`;
-        fragmentTrans.appendChild(pageContainerTrans);
       }
       viewerContainer.appendChild(fragment);
+
+      // 方案 1：右侧采用独立靶向舞台（Dedicated Current-Page Stage），不再构建多页虚拟占位
       if (viewerContainerTrans) {
         viewerContainerTrans.innerHTML = '';
-        viewerContainerTrans.appendChild(fragmentTrans);
+        renderTransStageForPage(currentPage);
       }
 
       // 创建视口按需加载 Observer (上下扩展 400px 缓冲带)
       setupVirtualObserver(renderId);
       setupScrollSpy();
-      setupTwinScrollSync();
     } catch (err) {
       if (renderId === currentRenderId) {
         console.error(err);
@@ -896,6 +884,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPage = closestPage;
         if (pageNumInput) pageNumInput.value = currentPage;
         updatePaginationButtons();
+        if (translationPane && !translationPane.classList.contains('hidden')) {
+          renderTransStageForPage(currentPage);
+        }
       }
     }, { passive: true });
   }
@@ -917,136 +908,97 @@ document.addEventListener('DOMContentLoaded', () => {
     if (targetLeft) {
       targetLeft.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-    if (viewerContainerTrans && !translationPane.classList.contains('hidden')) {
-      ensurePageTransMounted(currentPage, currentRenderId).then(() => {
-        syncTransPanePosition();
-      });
+    if (translationPane && !translationPane.classList.contains('hidden')) {
+      renderTransStageForPage(currentPage);
     }
   }
 
-  // 精准将右侧对照镜像容器滚动对齐到当前阅读页（单向同步，绝对不干扰左栏原文滚动）
-  function syncTransPanePosition() {
-    if (!translationPane || translationPane.classList.contains('hidden')) return;
-    if (!viewerContainerTrans || !pdfPane) return;
+  // 方案 1：右侧当前页独立靶向画板（Stage）渲染引擎
+  let currentTransStageRenderTask = null;
 
-    const targetOrig = viewerContainer.querySelector(`.page-container[data-page-num="${currentPage}"]`);
-    const targetTrans = viewerContainerTrans.querySelector(`.page-container[data-page-num="${currentPage}"]`);
-
-    if (targetOrig && targetTrans) {
-      const origRect = targetOrig.getBoundingClientRect();
-      const paneRect = pdfPane.getBoundingClientRect();
-      const relativeTop = origRect.top - paneRect.top;
-
-      const transRect = targetTrans.getBoundingClientRect();
-      const transContainerRect = viewerContainerTrans.getBoundingClientRect();
-      const currentRelativeTop = transRect.top - transContainerRect.top;
-
-      const diff = currentRelativeTop - relativeTop;
-      if (Math.abs(diff) > 0.5) {
-        viewerContainerTrans.scrollTop += diff;
-      }
-    }
-  }
-
-  // 左右双栏统一滚动同步体系（单向数据流 Single Source of Truth，彻底杜绝跳页反向震荡）
-  function setupTwinScrollSync() {
-    if (!pdfPane || !viewerContainerTrans) return;
-
-    // 1. 左栏为主滚动源：左栏滚动时，实时驱动右栏进行高精度视口对齐
-    pdfPane.addEventListener('scroll', () => {
-      syncTransPanePosition();
-    }, { passive: true });
-
-    // 2. 右栏滚轮穿透：在右侧对照栏内滚动滚轮时，直接驱动主视口（绝不计算不可靠比例，绝不反向拉扯）
-    if (translationPane) {
-      translationPane.addEventListener('wheel', (e) => {
-        const block = e.target.closest ? e.target.closest('.trans-overlay-block') : null;
-        if (block && block.scrollHeight > block.clientHeight) {
-          return;
-        }
-        pdfPane.scrollTop += e.deltaY;
-        e.preventDefault();
-      }, { passive: false });
-    }
-  }
-
-  // 专门确保右侧对照栏指定页面完整挂载底图 Canvas 与 trans-overlay-layer
-  async function ensurePageTransMounted(pageNum, renderId) {
+  async function renderTransStageForPage(pageNum) {
     if (!viewerContainerTrans || !currentPdf) return null;
-    const pageContainerTrans = viewerContainerTrans.querySelector(`.page-container[data-page-num="${pageNum}"]`);
-    if (!pageContainerTrans) return null;
+    const targetPageNum = Math.max(1, Math.min(pageNum || currentPage, currentPdf.numPages));
 
-    let canvasTrans = pageContainerTrans.querySelector('canvas');
-    let transOverlay = pageContainerTrans.querySelector('.trans-overlay-layer');
+    let stageContainer = viewerContainerTrans.querySelector('#trans-stage-page');
+    if (!stageContainer) {
+      viewerContainerTrans.innerHTML = '';
+      stageContainer = document.createElement('div');
+      stageContainer.id = 'trans-stage-page';
+      stageContainer.className = 'trans-stage-container';
+      viewerContainerTrans.appendChild(stageContainer);
+    }
 
-    // 如果已经挂载且有有效的 canvas，直接复用
-    if (canvasTrans && transOverlay && !pageContainerTrans.classList.contains('is-unloaded') && canvasTrans.width > 0) {
-      return { pageContainerTrans, canvasTrans, transOverlay };
+    stageContainer.dataset.pageNum = targetPageNum;
+
+    // 更新右栏标题状态指示
+    const hasTrans = pageTranslations.has(targetPageNum) && pageTranslations.get(targetPageNum).length > 0;
+    if (hasTrans) {
+      transActiveBadge.textContent = `已翻译 (第 ${targetPageNum} 页)`;
+    } else {
+      transActiveBadge.textContent = `第 ${targetPageNum} 页`;
     }
 
     try {
-      const page = await currentPdf.getPage(pageNum);
-      if (renderId && renderId !== currentRenderId) return null;
-
+      const page = await currentPdf.getPage(targetPageNum);
       const viewport = page.getViewport({ scale: currentScale });
       const wPx = Math.round(viewport.width);
       const hPx = Math.round(viewport.height);
 
-      pageContainerTrans.style.width = `${wPx}px`;
-      pageContainerTrans.style.height = `${hPx}px`;
+      stageContainer.style.width = `${wPx}px`;
+      stageContainer.style.height = `${hPx}px`;
 
-      if (!canvasTrans) {
-        canvasTrans = document.createElement('canvas');
+      let canvas = stageContainer.querySelector('canvas');
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        stageContainer.appendChild(canvas);
       }
-      canvasTrans.width = wPx;
-      canvasTrans.height = hPx;
-      const ctxTrans = canvasTrans.getContext('2d');
+      canvas.width = wPx;
+      canvas.height = hPx;
+      const ctx = canvas.getContext('2d');
 
-      // 核心性能与稳定性突破：优先从左侧已渲染的 canvas 直接克隆画面，0延时、极速硬件级呈现且绝不与 PDF.js 冲突
-      const pageContainerLeft = viewerContainer.querySelector(`.page-container[data-page-num="${pageNum}"]`);
-      const leftCanvas = pageContainerLeft ? pageContainerLeft.querySelector('canvas') : null;
+      // 极速硬件加速：优先复用左侧已渲染 Canvas 图像（0延迟、无闪烁）
+      const leftContainer = viewerContainer.querySelector(`.page-container[data-page-num="${targetPageNum}"]`);
+      const leftCanvas = leftContainer ? leftContainer.querySelector('canvas') : null;
       if (leftCanvas && leftCanvas.width === wPx && leftCanvas.height === hPx) {
-        ctxTrans.drawImage(leftCanvas, 0, 0);
+        ctx.drawImage(leftCanvas, 0, 0);
       } else {
-        await page.render({ canvasContext: ctxTrans, viewport: viewport }).promise;
-      }
-      if (renderId && renderId !== currentRenderId) return null;
-
-      if (!transOverlay) {
-        transOverlay = document.createElement('div');
-        transOverlay.className = 'trans-overlay-layer';
-      }
-
-      pageContainerTrans.innerHTML = '';
-      pageContainerTrans.classList.remove('is-unloaded');
-      pageContainerTrans.appendChild(canvasTrans);
-      pageContainerTrans.appendChild(transOverlay);
-
-      // 如果已有翻译缓存，立即重绘原排版覆盖译文块
-      if (pageTranslations.has(pageNum)) {
-        const blocks = pageTranslations.get(pageNum);
-        renderOverlayBlocksOnLayer(transOverlay, blocks, page.getViewport({ scale: 1.0 }).height, currentScale);
+        if (currentTransStageRenderTask) {
+          try { currentTransStageRenderTask.cancel(); } catch(e){}
+        }
+        currentTransStageRenderTask = page.render({ canvasContext: ctx, viewport });
+        await currentTransStageRenderTask.promise;
+        currentTransStageRenderTask = null;
       }
 
-      const existing = renderedPages.get(pageNum) || { isRendering: false, isRendered: true };
-      existing.canvasTrans = canvasTrans;
-      renderedPages.set(pageNum, existing);
+      let overlayLayer = stageContainer.querySelector('.trans-overlay-layer');
+      if (!overlayLayer) {
+        overlayLayer = document.createElement('div');
+        overlayLayer.className = 'trans-overlay-layer';
+        stageContainer.appendChild(overlayLayer);
+      }
 
-      return { pageContainerTrans, canvasTrans, transOverlay };
+      // 存在译文缓存时直接重绘原排版覆盖译文块
+      if (hasTrans) {
+        const blocks = pageTranslations.get(targetPageNum);
+        renderOverlayBlocksOnLayer(overlayLayer, blocks, page.getViewport({ scale: 1.0 }).height, currentScale, canvas);
+      } else {
+        overlayLayer.innerHTML = '';
+      }
+
+      return { stageContainer, canvas, overlayLayer, page, viewport };
     } catch (err) {
-      console.error(`挂载第 ${pageNum} 页右侧镜像失败:`, err);
+      if (err && err.name === 'RenderingCancelledException') return null;
+      console.error(`渲染第 ${targetPageNum} 页舞台失败:`, err);
       return null;
     }
   }
 
-  // 视口内挂载页面 (同步原排版渲染左侧原文与右侧译文镜像底图)
+  // 视口内挂载页面 (仅渲染左侧原文 Canvas 与文本层，零干扰右侧)
   async function mountPage(pageNum, renderId) {
     if (renderId && renderId !== currentRenderId) return;
     const pageState = renderedPages.get(pageNum);
     if (pageState && (pageState.isRendered || pageState.isRendering)) {
-      if (viewerContainerTrans && translationPane && !translationPane.classList.contains('hidden')) {
-        await ensurePageTransMounted(pageNum, renderId);
-      }
       return;
     }
 
@@ -1097,26 +1049,21 @@ document.addEventListener('DOMContentLoaded', () => {
       pageContainer.appendChild(canvas);
       pageContainer.appendChild(textLayerDiv);
 
-      // --- 同步挂载右侧对照镜像页面 (若右侧对照栏可见或已有翻译) ---
-      let canvasTrans = null;
-      if (viewerContainerTrans && (!translationPane.classList.contains('hidden') || pageTranslations.has(pageNum))) {
-        const transResult = await ensurePageTransMounted(pageNum, renderId);
-        if (transResult) canvasTrans = transResult.canvasTrans;
-      }
+      renderedPages.set(pageNum, { isRendering: false, isRendered: true, canvas: canvas });
 
-      renderedPages.set(pageNum, { isRendering: false, isRendered: true, canvas: canvas, canvasTrans: canvasTrans });
+      // 若恰好是当前活动阅读页，同步刷新右侧舞台底图
+      if (pageNum === currentPage && translationPane && !translationPane.classList.contains('hidden')) {
+        renderTransStageForPage(currentPage);
+      }
     } catch (e) {
       console.error(e);
       renderedPages.delete(pageNum);
     }
   }
 
-  // 移出视口卸载回收内存
+  // 移出视口卸载回收内存 (仅回收左侧原文离屏页面，右侧舞台完全隔离保护)
   function unmountPage(pageNum) {
-    // 关键安全防线：绝对严禁卸载当前正在阅读的页面、以及用户已耗费资源翻译好的页面！
-    if (pageNum === currentPage || pageTranslations.has(pageNum)) {
-      return;
-    }
+    if (pageNum === currentPage) return;
 
     const pageState = renderedPages.get(pageNum);
     if (!pageState || !pageState.isRendered) return;
@@ -1129,18 +1076,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       pageContainer.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${pageNum} 页 原文</span></div>`;
       pageContainer.classList.add('is-unloaded');
-    }
-
-    if (viewerContainerTrans) {
-      const pageContainerTrans = viewerContainerTrans.querySelector(`.page-container[data-page-num="${pageNum}"]`);
-      if (pageContainerTrans) {
-        if (pageState.canvasTrans) {
-          pageState.canvasTrans.width = 0;
-          pageState.canvasTrans.height = 0;
-        }
-        pageContainerTrans.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${pageNum} 页 译文</span></div>`;
-        pageContainerTrans.classList.add('is-unloaded');
-      }
     }
 
     renderedPages.delete(pageNum);
@@ -1192,14 +1127,142 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 重新绘制并挂载缓存的排版覆盖译文块
-  function renderOverlayBlocksOnLayer(overlayLayer, blocks, pageHeight, scale) {
+  // 采样页面背景基色 (4个角落+顶部边缘采样，兼容暗黑主题与深色幻灯片)
+  function getPageDominantBg(canvas) {
+    if (!canvas || !canvas.width || !canvas.height) return '#ffffff';
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const pts = [
+        [15, 15],
+        [canvas.width - 15, 15],
+        [15, canvas.height - 15],
+        [canvas.width - 15, canvas.height - 15],
+        [Math.round(canvas.width / 2), 20]
+      ];
+      for (const [px, py] of pts) {
+        const d = ctx.getImageData(Math.max(0, Math.min(canvas.width - 1, px)), Math.max(0, Math.min(canvas.height - 1, py)), 1, 1).data;
+        if (d[3] > 120) {
+          return `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+        }
+      }
+    } catch (e) {}
+    return '#ffffff';
+  }
+
+  // 采样指定包围盒区域的文字前景色与背景色
+  function sampleBlockColors(canvas, box, pageHeight, scale) {
+    const pageBg = getPageDominantBg(canvas);
+    const result = { color: '#1c1c1e', bgColor: pageBg };
+    if (!canvas || !canvas.width || !canvas.height) return result;
+
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const cW = canvas.width;
+      const cH = canvas.height;
+
+      const left = Math.round(box.x * scale);
+      const top = Math.round((pageHeight - box.y - box.h) * scale);
+      const width = Math.round(box.w * scale);
+      const height = Math.round(box.h * scale);
+
+      // 1. 围绕包围盒四周多点采样底色 (上、下、左、右)
+      const bgCandidates = [
+        [left + Math.round(width / 2), top - 3],
+        [left - 3, top + Math.round(height / 2)],
+        [left + width + 3, top + Math.round(height / 2)],
+        [left + Math.round(width / 2), top + height + 3],
+        [left + 4, top - 3]
+      ];
+
+      for (const [bx, by] of bgCandidates) {
+        if (bx >= 0 && bx < cW && by >= 0 && by < cH) {
+          const d = ctx.getImageData(bx, by, 1, 1).data;
+          if (d[3] > 120) {
+            result.bgColor = `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+            break;
+          }
+        }
+      }
+
+      // 解析背景 RGB
+      let bgR = 255, bgG = 255, bgB = 255;
+      const bgMatch = result.bgColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+      if (bgMatch) {
+        bgR = parseInt(bgMatch[1], 10);
+        bgG = parseInt(bgMatch[2], 10);
+        bgB = parseInt(bgMatch[3], 10);
+      }
+
+      // 2. 采样文字前景色：在文字框内部采样，寻找对比度最高、具有色彩倾向或最深/最亮色
+      const sampleX = Math.max(0, Math.min(cW - 8, left + Math.min(width * 0.2, 16)));
+      const sampleY = Math.max(0, Math.min(cH - 8, top + Math.min(height * 0.4, 16)));
+      const sampleW = Math.min(32, Math.max(6, Math.round(width * 0.5)));
+      const sampleH = Math.min(24, Math.max(6, Math.round(height * 0.5)));
+
+      const imgData = ctx.getImageData(sampleX, sampleY, sampleW, sampleH).data;
+      let bestColor = null;
+      let maxDist = 0;
+
+      for (let i = 0; i < imgData.length; i += 4) {
+        const r = imgData[i];
+        const g = imgData[i + 1];
+        const b = imgData[i + 2];
+        const a = imgData[i + 3];
+        if (a < 128) continue;
+
+        const dist = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
+        const colorSpread = Math.max(Math.abs(r - g), Math.abs(r - b), Math.abs(g - b));
+
+        // 强色彩倾向优先（如红、蓝、绿等强调标题色）
+        if (colorSpread > 35 && dist > 70) {
+          result.color = `rgb(${r}, ${g}, ${b})`;
+          return result;
+        }
+
+        if (dist > 50 && dist > maxDist) {
+          maxDist = dist;
+          bestColor = `rgb(${r}, ${g}, ${b})`;
+        }
+      }
+
+      if (bestColor) {
+        result.color = bestColor;
+      } else {
+        const isDarkBg = (bgR * 299 + bgG * 587 + bgB * 114) / 1000 < 128;
+        result.color = isDarkBg ? '#ffffff' : '#1c1c1e';
+      }
+    } catch (e) {
+      console.warn('色彩采样异常:', e);
+    }
+    return result;
+  }
+
+  // 重新绘制并挂载无痕原排版译文块 (底图原生擦除 Inpainting + 1:1 字号/颜色还原 + 智能自适应防重叠)
+  function renderOverlayBlocksOnLayer(overlayLayer, blocks, pageHeight, scale, stageCanvas) {
     if (!overlayLayer || !blocks) return;
     overlayLayer.innerHTML = '';
-    const pageNum = overlayLayer.parentElement ? parseInt(overlayLayer.parentElement.dataset.pageNum, 10) : 1;
+    const pageNum = overlayLayer.parentElement ? parseInt(overlayLayer.parentElement.dataset.pageNum, 10) : currentPage;
 
+    // 1. 如果提供了舞台底图 Canvas，先执行无痕底色擦除 (Inpainting)，抹除原版英文，防止透光重叠
+    if (stageCanvas && stageCanvas.getContext) {
+      const ctx = stageCanvas.getContext('2d');
+      blocks.forEach(block => {
+        if (!block.box || block.type === 'formula' || !block.transText) return;
+        const left = Math.round(block.box.x * scale);
+        const top = Math.round((pageHeight - block.box.y - block.box.h) * scale);
+        const width = Math.round(block.box.w * scale);
+        const height = Math.round(block.box.h * scale);
+
+        ctx.fillStyle = block.style?.bgColor || '#ffffff';
+        // 扩展 2px 覆盖边缘微小抗锯齿及字根外溢
+        ctx.fillRect(Math.max(0, left - 2), Math.max(0, top - 2), width + 4, height + 4);
+      });
+    }
+
+    // 2. 原位挂载无痕排版文本
     blocks.forEach(block => {
-      if (block.type === 'formula') return;
+      if (!block.box) return;
+      if (block.type === 'formula') return; // 公式保持原图渲染
       if (!block.transText) return;
 
       const overlayBlock = document.createElement('div');
@@ -1208,23 +1271,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const left = Math.round(block.box.x * scale);
       const top = Math.round((pageHeight - block.box.y - block.box.h) * scale);
-      const width = Math.max(Math.round(block.box.w * scale), 40);
-      const minHeight = Math.max(Math.round(block.box.h * scale), 16);
+      const width = Math.max(Math.round(block.box.w * scale), 20);
+      const minHeight = Math.max(Math.round(block.box.h * scale), 12);
+
+      // 原文字号 1:1 动态还原 (根据实际 PDF 变换矩阵计算的真实物理字号)
+      const baseFontSize = block.style?.fontSize ? Math.round(block.style.fontSize * scale) : 13;
+      const isBold = block.style?.isBold || false;
+      const textColor = block.style?.color || '#1c1c1e';
+
+      // 自适应弹性微调：根据译文字数与物理框高动态轻微微调字号，严丝合缝绝不挤压溢出下一段
+      const textLen = block.transText.length;
+      const charW = Math.max(8, baseFontSize * 0.95);
+      const charsPerLine = Math.max(1, Math.floor(width / charW));
+      const neededLines = Math.ceil(textLen / charsPerLine);
+      const targetLineHeight = baseFontSize >= 22 ? 1.2 : (baseFontSize >= 15 ? 1.28 : 1.35);
+      const estTotalHeight = neededLines * baseFontSize * targetLineHeight;
+
+      let finalFontSize = baseFontSize;
+      if (estTotalHeight > minHeight * 1.25 && minHeight >= 20) {
+        finalFontSize = Math.max(9, Math.round(baseFontSize * Math.sqrt(minHeight / estTotalHeight)));
+      }
 
       overlayBlock.style.left = `${left}px`;
       overlayBlock.style.top = `${top}px`;
       overlayBlock.style.width = `${width}px`;
       overlayBlock.style.minHeight = `${minHeight}px`;
+
+      overlayBlock.style.fontSize = `${finalFontSize}px`;
+      overlayBlock.style.fontWeight = isBold ? '700' : 'normal';
+      overlayBlock.style.color = textColor;
+      overlayBlock.style.lineHeight = finalFontSize >= 22 ? '1.2' : (finalFontSize >= 15 ? '1.28' : '1.35');
+      if (block.type === 'heading') {
+        overlayBlock.style.letterSpacing = '-0.2px';
+      }
+
+      // 无痕原版视觉：无多余浮窗边框与背景
+      overlayBlock.style.background = 'transparent';
+      overlayBlock.style.border = '1px solid transparent';
+      overlayBlock.style.boxShadow = 'none';
+
       overlayBlock.textContent = block.transText;
       overlayBlock.title = `原文: ${block.originalText}\n(双击复制译文，点击联动对齐原文)`;
-
-      const textLen = block.transText.length;
-      const approxLines = Math.max(1, Math.ceil((textLen * 13) / width));
-      const targetLineH = Math.max(14, minHeight / approxLines);
-      const targetFont = Math.max(11, Math.min(16, Math.floor(targetLineH * 0.8)));
-
-      overlayBlock.style.setProperty('--base-font-size', `${targetFont}px`);
-      overlayBlock.style.fontSize = `calc(var(--base-font-size, ${targetFont}px) * var(--trans-font-scale, 1))`;
 
       bindOverlayBlockInteractions(overlayBlock, block, pageNum, pageHeight, scale);
 
@@ -1445,21 +1532,15 @@ document.addEventListener('DOMContentLoaded', () => {
       p.classList.add('is-unloaded');
     });
 
-    if (viewerContainerTrans) {
-      const pagesTrans = viewerContainerTrans.querySelectorAll('.page-container');
-      pagesTrans.forEach(p => {
-        p.style.width = `${defaultW}px`;
-        p.style.height = `${defaultH}px`;
-        p.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${p.dataset.pageNum} 页 译文</span></div>`;
-        p.classList.add('is-unloaded');
-      });
-    }
-
     setupVirtualObserver(renderId);
 
     const targetPageElement = viewerContainer.querySelector(`.page-container[data-page-num="${lastPage}"]`);
     if (targetPageElement) {
       targetPageElement.scrollIntoView();
+    }
+
+    if (translationPane && !translationPane.classList.contains('hidden')) {
+      renderTransStageForPage(currentPage);
     }
   }
   // --- 论文/学术 PDF 段落、图表及公式识别与保护算法 ---
@@ -1548,59 +1629,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return restored;
   }
 
-  // 在右侧镜像页面上渲染覆盖排版块
-  function renderOverlayBlocksOnLayer(layer, blocks, pageHeight, scale) {
-    if (!layer || !blocks) return;
-    layer.innerHTML = '';
-
-    blocks.forEach(block => {
-      if (!block.box) return;
-      if (block.type === 'formula') return; // 公式保持底层原图，免遮盖
-      if (!block.transText) return;
-
-      const blockEl = document.createElement('div');
-      blockEl.className = 'trans-overlay-block';
-      blockEl.dataset.blockId = block.id;
-
-      const left = Math.round(block.box.x * scale);
-      const top = Math.round((pageHeight - block.box.y - block.box.h) * scale);
-      const width = Math.max(Math.round(block.box.w * scale), 40);
-      const minHeight = Math.max(Math.round(block.box.h * scale), 16);
-
-      blockEl.style.left = `${left}px`;
-      blockEl.style.top = `${top}px`;
-      blockEl.style.width = `${width}px`;
-      blockEl.style.minHeight = `${minHeight}px`;
-
-      // 动态根据译文字数自适应字号与行高
-      const textLen = block.transText.length;
-      const approxLines = Math.max(1, Math.ceil((textLen * 13) / width));
-      const targetLineH = Math.max(14, minHeight / approxLines);
-      const targetFont = Math.max(11, Math.min(16, Math.floor(targetLineH * 0.8)));
-
-      blockEl.style.fontSize = `${targetFont}px`;
-      blockEl.textContent = block.transText;
-      blockEl.title = `原文: ${block.originalText}\n(双击复制译文)`;
-
-      blockEl.addEventListener('mouseenter', () => {
-        blockEl.classList.add('highlight-linked');
-      });
-      blockEl.addEventListener('mouseleave', () => {
-        blockEl.classList.remove('highlight-linked');
-      });
-
-      blockEl.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(block.transText);
-        const originalBg = blockEl.style.background;
-        blockEl.style.background = '#d1fadf';
-        setTimeout(() => { blockEl.style.background = originalBg; }, 1000);
-      });
-
-      layer.appendChild(blockEl);
-    });
-  }
-
   // 5. 页面语义块解析算法 (精准识别行、段落、图表、公式，支持双栏学术排版与标点清洗)
   async function extractPageBlocks(page, skipFormulas) {
     const textContent = await page.getTextContent();
@@ -1615,106 +1643,139 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter(item => item.str && item.str.trim())
       .map(item => {
         const cleanStr = normalizePdfText(item.str);
+        // 计算实际物理字号: 根据 transform 仿射变换矩阵
+        const fontSize = Math.round(Math.hypot(item.transform[0], item.transform[1]) * 10) / 10 || item.height || 12;
+        const isBold = /bold|black|heavy|700/i.test(item.fontName || '');
         return {
           str: cleanStr,
           x: item.transform[4],
           y: item.transform[5],
           w: item.width,
-          h: item.height || Math.abs(item.transform[3]) || 12
+          h: item.height || Math.abs(item.transform[3]) || fontSize,
+          fontSize: fontSize,
+          isBold: isBold,
+          fontName: item.fontName || ''
         };
       })
       .filter(item => item.str.trim().length > 0);
 
     if (validItems.length === 0) return [];
 
-    // 检测学术论文/技术文档常见双栏排版布局 (Two-column layout detection)
-    const bodyItems = validItems.filter(it => it.y > pageHeight * 0.15 && it.y < pageHeight * 0.85);
-    const leftColItems = bodyItems.filter(it => it.x + it.w / 2 < pageWidth * 0.46);
-    const rightColItems = bodyItems.filter(it => it.x + it.w / 2 > pageWidth * 0.54);
-    const centerCrossItems = bodyItems.filter(it => it.x < pageWidth * 0.46 && (it.x + it.w) > pageWidth * 0.54);
-
-    const isTwoColumn = (leftColItems.length >= 8 && rightColItems.length >= 8 && centerCrossItems.length < 5);
-
-    // 聚合成物理行 (Y 容差 4pt)
-    const rawLines = [];
+    // 聚合成物理 Y 分组 (Y 容差 3pt)
+    const rawYGroups = [];
     for (const item of validItems) {
-      // 忽略页眉页脚（距离顶部或底部 32pt 以内的页码或轻量元信息）
-      if (item.y > pageHeight - 32 || item.y < 32) {
+      // 忽略页眉页脚（距离顶部或底部 28pt 以内的纯页码）
+      if (item.y > pageHeight - 28 || item.y < 28) {
         if (/^\d+$/.test(item.str.trim()) || /^Page\s*\d+/i.test(item.str.trim())) {
           continue;
         }
       }
 
-      let line = rawLines.find(l => Math.abs(l.y - item.y) <= 4);
-      if (line) {
-        line.items.push(item);
+      let group = rawYGroups.find(g => Math.abs(g.y - item.y) <= 3);
+      if (group) {
+        group.items.push(item);
       } else {
-        rawLines.push({
-          y: item.y,
-          h: item.h,
-          items: [item]
+        rawYGroups.push({ y: item.y, items: [item] });
+      }
+    }
+
+    // 针对每个物理 Y 行，依据水平 X 间隙 (X-Gap) 与字号差异分割为独立线段，彻底避免左右分栏与图表被粘连
+    const processedLines = [];
+    for (const group of rawYGroups) {
+      group.items.sort((a, b) => a.x - b.x);
+
+      const segments = [];
+      let currSeg = [group.items[0]];
+
+      for (let i = 1; i < group.items.length; i++) {
+        const prev = group.items[i - 1];
+        const curr = group.items[i];
+        const xGap = curr.x - (prev.x + prev.w);
+        const refFont = Math.max(prev.fontSize, curr.fontSize);
+
+        // 阈值：水平间隙超过 1.6 倍字号且绝对距离 > 14pt，或字号差距大于 5pt，分割为不同线段
+        const maxGap = Math.max(14, refFont * 1.6);
+        if (xGap > maxGap || Math.abs(curr.fontSize - prev.fontSize) > 5) {
+          segments.push(currSeg);
+          currSeg = [curr];
+        } else {
+          currSeg.push(curr);
+        }
+      }
+      segments.push(currSeg);
+
+      for (const seg of segments) {
+        let text = seg[0].str;
+        for (let i = 1; i < seg.length; i++) {
+          const prev = seg[i - 1];
+          const curr = seg[i];
+          const gap = curr.x - (prev.x + prev.w);
+          if (gap > 1.8 && !text.endsWith(' ') && !curr.str.startsWith(' ')) {
+            text += ' ' + curr.str;
+          } else {
+            text += curr.str;
+          }
+        }
+
+        const minX = Math.min(...seg.map(it => it.x));
+        const maxX = Math.max(...seg.map(it => it.x + it.w));
+        const minY = Math.min(...seg.map(it => it.y));
+        const maxY = Math.max(...seg.map(it => it.y + it.h));
+        const avgFontSize = seg.reduce((s, it) => s + it.fontSize, 0) / seg.length;
+        const anyBold = seg.some(it => it.isBold);
+        const fontName = seg[0].fontName;
+
+        processedLines.push({
+          text: text.trim(),
+          x: minX,
+          y: minY,
+          w: maxX - minX,
+          h: maxY - minY,
+          fontSize: avgFontSize,
+          isBold: anyBold,
+          fontName: fontName,
+          box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
         });
       }
     }
 
-    // 行内元素按 X 升序重组并计算包围盒
-    const processedLines = rawLines.map(line => {
-      line.items.sort((a, b) => a.x - b.x);
-      let text = line.items[0].str;
-      for (let i = 1; i < line.items.length; i++) {
-        const prev = line.items[i - 1];
-        const curr = line.items[i];
-        if (curr.x - (prev.x + prev.w) > 2 && !text.endsWith(' ') && !curr.str.startsWith(' ')) {
-          text += ' ' + curr.str;
-        } else {
-          text += curr.str;
-        }
-      }
-      const minX = line.items[0].x;
-      const maxX = Math.max(...line.items.map(it => it.x + it.w));
-      const minY = Math.min(...line.items.map(it => it.y));
-      const maxY = Math.max(...line.items.map(it => it.y + it.h));
-      return {
-        text: text.trim(),
-        y: line.y,
-        h: line.h,
-        x: minX,
-        box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-      };
-    }).filter(l => l.text.length > 0);
+    // 检测学术论文/技术文档常见双栏排版布局
+    const bodyLines = processedLines.filter(l => l.y > pageHeight * 0.12 && l.y < pageHeight * 0.88);
+    const leftColLines = bodyLines.filter(l => (l.x + l.w / 2) < pageWidth * 0.48);
+    const rightColLines = bodyLines.filter(l => (l.x + l.w / 2) > pageWidth * 0.52);
+    const isTwoColumn = (leftColLines.length >= 6 && rightColLines.length >= 6);
 
-    // 双栏与单栏阅读流排序
     let orderedLines = [];
     if (isTwoColumn) {
       const topSpans = [];
-      const col1Lines = [];
-      const col2Lines = [];
+      const col1 = [];
+      const col2 = [];
       const bottomSpans = [];
 
       for (const line of processedLines) {
-        const isWide = line.box.w > pageWidth * 0.65;
+        const isWide = line.w > pageWidth * 0.62;
         if (isWide && line.y > pageHeight * 0.6) {
           topSpans.push(line);
         } else if (isWide && line.y < pageHeight * 0.25) {
           bottomSpans.push(line);
-        } else if (line.x + line.box.w / 2 < pageWidth * 0.5) {
-          col1Lines.push(line);
+        } else if (line.x + line.w / 2 < pageWidth * 0.5) {
+          col1.push(line);
         } else {
-          col2Lines.push(line);
+          col2.push(line);
         }
       }
 
       topSpans.sort((a, b) => b.y - a.y);
-      col1Lines.sort((a, b) => b.y - a.y);
-      col2Lines.sort((a, b) => b.y - a.y);
+      col1.sort((a, b) => b.y - a.y);
+      col2.sort((a, b) => b.y - a.y);
       bottomSpans.sort((a, b) => b.y - a.y);
 
-      orderedLines = [...topSpans, ...col1Lines, ...col2Lines, ...bottomSpans];
+      orderedLines = [...topSpans, ...col1, ...col2, ...bottomSpans];
     } else {
       orderedLines = processedLines.sort((a, b) => b.y - a.y);
     }
 
-    // 按段落、行距、标题将行聚合成语义块，并保留精确包围盒
+    // 按段落、行距、标题、图表将行聚合成语义块，并保留精确包围盒与字号样式
     const blocks = [];
     let currentParagraphLines = [];
 
@@ -1727,15 +1788,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const minY = Math.min(...currentParagraphLines.map(l => l.box.y));
         const maxY = Math.max(...currentParagraphLines.map(l => l.box.y + l.box.h));
 
+        const avgFontSize = currentParagraphLines.reduce((s, l) => s + l.fontSize, 0) / currentParagraphLines.length;
+        const isBold = currentParagraphLines.some(l => l.isBold);
+        const fontName = currentParagraphLines[0].fontName || '';
+
+        let blockType = 'paragraph';
+        if (avgFontSize >= 16 || (isBold && avgFontSize >= 12.5 && currentParagraphLines.length <= 2)) {
+          blockType = 'heading';
+        } else if (avgFontSize <= 9.5 || isChartCaption(mergedText)) {
+          blockType = 'caption';
+        }
+
         blocks.push({
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          type: 'paragraph',
+          type: blockType,
           originalText: mergedText.trim(),
           box: {
-            x: Math.max(0, minX - 2),
+            x: Math.max(0, minX - 1),
             y: minY,
-            w: Math.min(pageWidth - minX, maxX - minX + 4),
+            w: Math.min(pageWidth - minX, maxX - minX + 2),
             h: maxY - minY
+          },
+          style: {
+            fontSize: Math.round(avgFontSize * 10) / 10,
+            isBold: isBold,
+            fontName: fontName
           }
         });
       }
@@ -1753,7 +1830,12 @@ document.addEventListener('DOMContentLoaded', () => {
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           type: 'formula',
           originalText: text,
-          box: lineObj.box
+          box: lineObj.box,
+          style: {
+            fontSize: Math.round(lineObj.fontSize * 10) / 10,
+            isBold: lineObj.isBold,
+            fontName: lineObj.fontName
+          }
         });
         continue;
       }
@@ -1765,18 +1847,27 @@ document.addEventListener('DOMContentLoaded', () => {
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           type: 'caption',
           originalText: text,
-          box: lineObj.box
+          box: lineObj.box,
+          style: {
+            fontSize: Math.round(lineObj.fontSize * 10) / 10,
+            isBold: lineObj.isBold,
+            fontName: lineObj.fontName
+          }
         });
         continue;
       }
 
-      // 3) 段落分界检测：垂直行距判断
+      // 3) 段落分界检测：垂直行距、字号差异与横向跳跃
       if (currentParagraphLines.length > 0) {
         const prevLine = currentParagraphLines[currentParagraphLines.length - 1];
         const lineGap = prevLine.y - lineObj.y;
         const avgH = (prevLine.h + lineObj.h) / 2;
 
-        if (lineGap > avgH * 1.55 || lineGap < 0) {
+        // 若行距过大、行距逆向、字号差异大于 2.2pt、或左右列对齐偏差过大 (> 35pt)，立即切断段落
+        const fontDiff = Math.abs(prevLine.fontSize - lineObj.fontSize);
+        const xOffset = Math.abs(prevLine.x - lineObj.x);
+
+        if (lineGap > avgH * 1.55 || lineGap < 0 || fontDiff > 2.2 || xOffset > 35) {
           flushParagraph();
         }
       }
@@ -1811,33 +1902,50 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 7. 翻译单页核心方法 (原排版左右镜像对照翻译)
+  // 6.5 方案 2：整页 JSON 结构化批量翻译 API (单次往返，速度提升 15 倍，杜绝 429)
+  function requestBatchTranslation(items, engine, targetLang, model) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: 'translateBatch',
+        items: items,
+        engine: engine,
+        targetLang: targetLang,
+        model: model
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (!response) {
+          reject(new Error('批量翻译超时或服务未响应'));
+        } else if (response.success && Array.isArray(response.translations)) {
+          resolve(response.translations);
+        } else {
+          reject(new Error(response.error || '批量翻译失败'));
+        }
+      });
+    });
+  }
+
+  // 7. 翻译单页核心方法 (原排版独立靶向舞台 + 批量 JSON 协议)
   async function translatePage(pageNum, isBatch = false) {
     if (!currentPdf) return;
-    const targetPageNum = pageNum || currentPage;
-    const page = await currentPdf.getPage(targetPageNum);
+    const targetPageNum = Math.max(1, Math.min(pageNum || currentPage, currentPdf.numPages));
     const skipFormulas = skipFormulasCheckbox ? skipFormulasCheckbox.checked : true;
 
-    // 1. 展开并显示右侧排版对照栏
+    // 1. 展开并显示右侧排版对照栏及顶部操作区
     translationPane.classList.remove('hidden');
     toggleBilingualBtn.classList.add('active');
-    transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页`;
+    if (transToolbarActions) transToolbarActions.classList.remove('hidden');
+    if (transActiveBadge) transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页 (准备中...)`;
 
-    // 2. 关键：确保右侧镜像页面底图Canvas和图层已挂载（瞬间呈现，绝不白屏/空灰屏）
-    const transMount = await ensurePageTransMounted(targetPageNum, currentRenderId);
-    if (!transMount) {
-      console.error(`挂载第 ${targetPageNum} 页右侧镜像失败`);
+    // 2. 渲染右侧当前页独立靶向画板（Stage）
+    const stage = await renderTransStageForPage(targetPageNum);
+    if (!stage) {
+      console.error(`挂载第 ${targetPageNum} 页舞台失败`);
       return;
     }
 
-    // 3. 对齐视口位置（仅单向驱动右栏，绝不反向拉扯左栏导致跳页）
-    syncTransPanePosition();
-
-    const { pageContainerTrans, transOverlay } = transMount;
-    let overlayLayer = transOverlay;
-
-    const viewport = page.getViewport({ scale: 1.0 });
-    const pageHeight = viewport.height;
+    const { overlayLayer, page } = stage;
+    const pageHeight = page.getViewport({ scale: 1.0 }).height;
 
     // 3. 提取并结构化页面内容块与物理边界
     const blocks = await extractPageBlocks(page, skipFormulas);
@@ -1846,7 +1954,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (scannedPdfAlert) {
         const alertText = scannedPdfAlert.querySelector('.scanned-alert-text');
         if (alertText) {
-          alertText.textContent = `检测到第 ${pageNum} 页为扫描件/纯图片 PDF（无可选文本层），暂无法直接提取文字。建议使用 OCR 工具识别文本后再进行排版翻译。`;
+          alertText.textContent = `检测到第 ${targetPageNum} 页为扫描件/纯图片 PDF（无可选文本层），暂无法直接提取文字。建议使用 OCR 工具识别文本后再进行排版翻译。`;
         }
         scannedPdfAlert.classList.remove('hidden');
       }
@@ -1866,44 +1974,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const targetLang = settings.defaultTargetLang || 'zh-CN';
 
-    // 4. 先为所有需翻译的块创建原位排版占位框（立即显示半透明磨砂气泡，感知0等待）
-    const blocksToTranslate = [];
+    // 3.5 采样当前页面各块的文字前景色与底色
+    blocks.forEach(b => {
+      if (b.box) {
+        const colors = sampleBlockColors(stage.canvas, b.box, pageHeight, currentScale);
+        b.style = b.style || {};
+        b.style.color = colors.color;
+        b.style.bgColor = colors.bgColor;
+      }
+    });
+
+    // 4. 创建原位排版占位框（立即显示半透明磨砂气泡，感知0等待）
+    overlayLayer.innerHTML = '';
+    const tasksToTranslate = [];
+
     for (const block of blocks) {
       if (block.type === 'formula' && skipFormulas) {
         block.transText = block.originalText;
         continue;
       }
-
-      let overlayBlock = overlayLayer ? overlayLayer.querySelector(`.trans-overlay-block[data-block-id="${block.id}"]`) : null;
-      if (overlayLayer && !overlayBlock) {
-        overlayBlock = document.createElement('div');
-        overlayBlock.className = 'trans-overlay-block is-translating';
-        overlayBlock.dataset.blockId = block.id;
-
-        const left = Math.round(block.box.x * currentScale);
-        const top = Math.round((pageHeight - block.box.y - block.box.h) * currentScale);
-        const width = Math.max(Math.round(block.box.w * currentScale), 40);
-        const minHeight = Math.max(Math.round(block.box.h * currentScale), 16);
-
-        overlayBlock.style.left = `${left}px`;
-        overlayBlock.style.top = `${top}px`;
-        overlayBlock.style.width = `${width}px`;
-        overlayBlock.style.minHeight = `${minHeight}px`;
-        overlayBlock.textContent = '翻译中...';
-
-        overlayLayer.appendChild(overlayBlock);
-      }
-
-      blocksToTranslate.push({ block, overlayBlock });
-    }
-
-    // 5. 并发受限执行翻译（并发数 = 4，大幅提升单页翻译吞吐率，从30s压缩至3-5s）
-    const CONCURRENCY = 4;
-    let queueIndex = 0;
-
-    async function processBlockTask(task) {
-      if (activeTranslateController && activeTranslateController.aborted) return;
-      const { block, overlayBlock } = task;
 
       let textToTranslate = block.originalText;
       let tokenMap = null;
@@ -1913,54 +2002,86 @@ document.addEventListener('DOMContentLoaded', () => {
         tokenMap = protectedObj.tokenMap;
       }
 
-      try {
-        const transResult = await requestTranslation(textToTranslate, engine, targetLang, selectedModel);
-        if (activeTranslateController && activeTranslateController.aborted) return;
+      const overlayBlock = document.createElement('div');
+      overlayBlock.className = 'trans-overlay-block is-translating';
+      overlayBlock.dataset.blockId = block.id;
 
-        const finalText = tokenMap ? restoreInlineFormulas(transResult, tokenMap) : transResult;
-        block.transText = finalText;
+      const left = Math.round(block.box.x * currentScale);
+      const top = Math.round((pageHeight - block.box.y - block.box.h) * currentScale);
+      const width = Math.max(Math.round(block.box.w * currentScale), 20);
+      const minHeight = Math.max(Math.round(block.box.h * currentScale), 12);
+      const placeholderFont = Math.round((block.style?.fontSize || 12) * currentScale);
 
-        if (overlayBlock) {
-          overlayBlock.classList.remove('is-translating');
-          overlayBlock.textContent = finalText;
-          overlayBlock.title = `原文: ${block.originalText}\n(双击复制译文，点击联动对齐原文)`;
+      overlayBlock.style.left = `${left}px`;
+      overlayBlock.style.top = `${top}px`;
+      overlayBlock.style.width = `${width}px`;
+      overlayBlock.style.minHeight = `${minHeight}px`;
+      overlayBlock.style.fontSize = `${Math.min(placeholderFont, 14)}px`;
+      overlayBlock.textContent = '翻译中...';
 
-          const width = overlayBlock.offsetWidth || 100;
-          const minHeight = overlayBlock.offsetHeight || 20;
-          const textLen = finalText.length;
-          const approxLines = Math.max(1, Math.ceil((textLen * 13) / width));
-          const targetLineH = Math.max(14, minHeight / approxLines);
-          const targetFont = Math.max(11, Math.min(16, Math.floor(targetLineH * 0.8)));
+      overlayLayer.appendChild(overlayBlock);
 
-          overlayBlock.style.setProperty('--base-font-size', `${targetFont}px`);
-          overlayBlock.style.fontSize = `calc(var(--base-font-size, ${targetFont}px) * var(--trans-font-scale, 1))`;
-
-          bindOverlayBlockInteractions(overlayBlock, block, pageNum, pageHeight, currentScale);
-        }
-      } catch (err) {
-        block.transText = `[翻译失败: ${err.message}]`;
-        if (overlayBlock) {
-          overlayBlock.classList.remove('is-translating');
-          overlayBlock.classList.add('error');
-          overlayBlock.textContent = `翻译失败: ${err.message}`;
-        }
-      }
+      tasksToTranslate.push({
+        block,
+        overlayBlock,
+        textToTranslate,
+        tokenMap
+      });
     }
 
-    async function worker() {
-      while (queueIndex < blocksToTranslate.length) {
-        if (activeTranslateController && activeTranslateController.aborted) break;
-        const task = blocksToTranslate[queueIndex++];
-        if (task) {
-          await processBlockTask(task);
-        }
-      }
+    if (tasksToTranslate.length === 0) {
+      renderOverlayBlocksOnLayer(overlayLayer, blocks, pageHeight, currentScale, stage.canvas);
+      pageTranslations.set(targetPageNum, blocks);
+      transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页 (无需翻译)`;
+      return;
     }
 
-    const workers = Array.from({ length: Math.min(CONCURRENCY, blocksToTranslate.length) }, () => worker());
-    await Promise.all(workers);
+    transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页 (AI 翻译中...)`;
 
-    pageTranslations.set(pageNum, blocks);
+    // 5. 方案 2 落地：整页结构化单次批量请求 (Batch Context Translation)
+    try {
+      const payload = tasksToTranslate.map(t => ({ id: t.block.id, text: t.textToTranslate }));
+      const transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel);
+
+      if (activeTranslateController && activeTranslateController.aborted) return;
+
+      const transMap = new Map();
+      if (Array.isArray(transResults)) {
+        transResults.forEach(r => transMap.set(r.id, r.text));
+      }
+
+      for (const task of tasksToTranslate) {
+        const rawTrans = transMap.get(task.block.id) || task.block.originalText;
+        const finalText = task.tokenMap ? restoreInlineFormulas(rawTrans, task.tokenMap) : rawTrans;
+        task.block.transText = finalText;
+      }
+
+      // 再次确认色彩采样
+      blocks.forEach(b => {
+        if (b.box && (!b.style?.color || !b.style?.bgColor)) {
+          const colors = sampleBlockColors(stage.canvas, b.box, pageHeight, currentScale);
+          b.style = b.style || {};
+          b.style.color = colors.color;
+          b.style.bgColor = colors.bgColor;
+        }
+      });
+
+      // 原排版无痕覆盖渲染：底图 Inpainting 擦除原英文 + 1:1 字号颜色还原
+      renderOverlayBlocksOnLayer(overlayLayer, blocks, pageHeight, currentScale, stage.canvas);
+
+      pageTranslations.set(targetPageNum, blocks);
+      transActiveBadge.textContent = isBatch ? '全文翻译中...' : `已翻译 (第 ${targetPageNum} 页)`;
+    } catch (err) {
+      console.error('批量翻译失败:', err);
+      transActiveBadge.textContent = `翻译失败: ${err.message}`;
+      tasksToTranslate.forEach(t => {
+        if (t.overlayBlock) {
+          t.overlayBlock.classList.remove('is-translating');
+          t.overlayBlock.classList.add('error');
+          t.overlayBlock.textContent = `翻译失败: ${err.message}`;
+        }
+      });
+    }
   }
 
   // 8. 全文自动翻译核心方法
@@ -2002,6 +2123,8 @@ document.addEventListener('DOMContentLoaded', () => {
       transActiveBadge.textContent = '已完成';
     }
 
+    renderTransStageForPage(currentPage);
+
     setTimeout(() => {
       transProgressCard.classList.add('hidden');
     }, 2500);
@@ -2039,18 +2162,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const willBeVisible = translationPane.classList.contains('hidden');
       translationPane.classList.toggle('hidden', !willBeVisible);
       toggleBilingualBtn.classList.toggle('active', willBeVisible);
-      if (willBeVisible) {
-        ensurePageTransMounted(currentPage, currentRenderId).then(() => {
-          syncTransPanePosition();
-        });
+      if (transToolbarActions) {
+        transToolbarActions.classList.toggle('hidden', !willBeVisible);
       }
-    });
-  }
-
-  if (closeTransPaneBtn) {
-    closeTransPaneBtn.addEventListener('click', () => {
-      translationPane.classList.add('hidden');
-      toggleBilingualBtn.classList.remove('active');
+      if (willBeVisible) {
+        renderTransStageForPage(currentPage);
+      }
     });
   }
 
@@ -2120,42 +2237,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 12. 交互增强：字号微调控制 (A- / A+)
-  if (transFontDecBtn) {
-    transFontDecBtn.addEventListener('click', () => {
-      transFontScale = Math.max(0.7, +(transFontScale - 0.1).toFixed(1));
-      if (transFontScaleText) transFontScaleText.textContent = `${Math.round(transFontScale * 100)}%`;
-      if (viewerWorkspace) viewerWorkspace.style.setProperty('--trans-font-scale', transFontScale);
-    });
-  }
-
-  if (transFontIncBtn) {
-    transFontIncBtn.addEventListener('click', () => {
-      transFontScale = Math.min(1.5, +(transFontScale + 0.1).toFixed(1));
-      if (transFontScaleText) transFontScaleText.textContent = `${Math.round(transFontScale * 100)}%`;
-      if (viewerWorkspace) viewerWorkspace.style.setProperty('--trans-font-scale', transFontScale);
-    });
-  }
-
-  // 13. 交互增强：底色遮罩透明度模式循环切换
-  if (toggleTransOpacityBtn) {
-    toggleTransOpacityBtn.addEventListener('click', () => {
-      opacityModeIndex = (opacityModeIndex + 1) % opacityModes.length;
-      if (viewerContainerTrans) {
-        opacityModes.forEach(m => m && viewerContainerTrans.classList.remove(m));
-        if (opacityModes[opacityModeIndex]) {
-          viewerContainerTrans.classList.add(opacityModes[opacityModeIndex]);
-        }
-      }
-      toggleTransOpacityBtn.title = opacityTitles[opacityModeIndex];
-      toggleTransOpacityBtn.classList.toggle('is-active', opacityModeIndex > 0);
-    });
-  }
-
-  // 14. 交互增强：常驻透视原图锁定切换
+  // 12. 顶部工具栏透视原图锁定切换
   if (toggleTransPeekBtn) {
     toggleTransPeekBtn.addEventListener('click', () => {
       isPeekingLocked = !isPeekingLocked;
+      const viewerContainerTrans = document.getElementById('pdf-viewer-container-trans');
       if (viewerContainerTrans) {
         viewerContainerTrans.classList.toggle('peek-original', isPeekingLocked);
       }

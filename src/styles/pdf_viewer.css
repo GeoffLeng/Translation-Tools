@@ -244,23 +244,18 @@ body {
   flex: 1;
   background: #f2f2f7;
   border-right: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 16px 16px 85px 16px;
 }
 
-.pane-column-banner {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.pane-banner-tag {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #636366;
-  background: rgba(0, 0, 0, 0.06);
-  padding: 3px 12px;
-  border-radius: 12px;
-  letter-spacing: 0.5px;
+.trans-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 122, 255, 0.06);
+  border: 1px solid rgba(0, 122, 255, 0.16);
+  border-radius: 8px;
+  padding: 2px 6px;
+  margin-left: 2px;
 }
 
 /* Bilingual Mirrored Translation Pane */
@@ -279,14 +274,55 @@ body {
 
 .pdf-pane-trans #pdf-viewer-container-trans {
   flex: 1;
-  overflow-y: hidden;
+  overflow-y: auto;
   overflow-x: auto;
-  padding: 16px 12px 85px 12px;
+  padding: 16px 16px 90px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   width: 100%;
   box-sizing: border-box;
+}
+
+/* Dedicated Target Page Stage Container (主视口驱动 + 当前页靶向舞台) */
+.trans-stage-container {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0 auto;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.trans-stage-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.trans-stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 24px;
+  color: #8e8e93;
+  text-align: center;
+}
+
+.trans-stage-empty-icon {
+  margin-bottom: 16px;
+  color: #007aff;
+  opacity: 0.85;
+}
+
+.trans-stage-empty p {
+  font-size: 14px;
+  margin-bottom: 18px;
+  color: #3a3a3c;
+  font-weight: 500;
 }
 
 /* Translation Overlay Layer */
@@ -328,36 +364,44 @@ body {
 .trans-overlay-block {
   position: absolute;
   box-sizing: border-box;
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid rgba(0, 122, 255, 0.16);
-  border-radius: 3px;
-  padding: 2px 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  padding: 0;
+  margin: 0;
   color: #1c1c1e;
-  line-height: 1.35;
+  line-height: 1.32;
   word-break: break-word;
-  overflow: hidden;
+  overflow: visible;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  transition: box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  box-shadow: none;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
   user-select: text;
 }
 
 .trans-overlay-block:hover {
-  border-color: #007aff;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  border: 1px dashed rgba(0, 122, 255, 0.55);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
   z-index: 50 !important;
-  background: #ffffff !important;
+  background: rgba(255, 255, 255, 0.92) !important;
   overflow-y: auto;
   max-height: 380px;
   height: auto !important;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .trans-overlay-block.is-translating {
-  background: rgba(255, 255, 255, 0.88);
-  color: #8e8e93;
+  background: rgba(255, 255, 255, 0.75) !important;
+  border: 1px dashed rgba(0, 122, 255, 0.4) !important;
+  color: #007aff !important;
   font-style: italic;
-  font-size: 12px;
+  font-size: 11px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
 }
 
 .highlight-linked {

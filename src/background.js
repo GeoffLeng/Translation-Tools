@@ -369,6 +369,246 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
   throw new Error('API 没有返回有效的翻译文本内容');
 }
 
+// 3.5 结构化批量翻译逻辑 (Batch Context Prompting)
+async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoint, modelName) {
+  if (!apiKey) throw new Error('该服务未配置 API Key，请在设置中配置');
+  if (!endpoint) throw new Error('接口地址未配置');
+
+  const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
+  
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+    'HTTP-Referer': 'https://github.com/GeoffLeng/Translation-Tools',
+    'X-Title': 'Lite Translate'
+  };
+
+  const systemPrompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
+严格遵循以下要求：
+1. 保持每一个对象的 "id" 字段与原始输入严格一致。
+2. 仅翻译 "text" 字段的内容，专业术语翻译需严谨规范。
+3. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
+4. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释、前导词或注脚。`;
+
+  const userPrompt = JSON.stringify(items.map(item => ({ id: item.id, text: item.text })));
+
+  const res = await fetchWithTimeout(endpoint, {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify({
+      model: modelName,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: 0.2
+    })
+  }, 40000);
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || `API 错误: ${res.status}`);
+  }
+
+  const data = await res.json();
+  const choice = data.choices && data.choices[0];
+  let rawContent = '';
+  if (choice) {
+    const content = choice.message?.content;
+    if (typeof content === 'string') rawContent = content.trim();
+    else if (Array.isArray(content)) rawContent = content.map(p => (p && p.text) ? p.text : '').join('').trim();
+    else if (choice.text) rawContent = choice.text.trim();
+  }
+
+  if (!rawContent) throw new Error('API 没有返回翻译内容');
+
+  let cleanJson = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleanJson);
+    if (Array.isArray(parsed)) {
+      return parsed.map(p => ({ id: p.id, text: p.text }));
+    }
+  } catch (parseErr) {
+    const matched = [];
+    const objRegex = /\{"id"\s*:\s*([^,]+),\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\}/g;
+    let match;
+    while ((match = objRegex.exec(cleanJson)) !== null) {
+      try {
+        const idVal = JSON.parse(match[1]);
+        const textVal = JSON.parse(`"${match[2]}"`);
+        matched.push({ id: idVal, text: textVal });
+      } catch (e) {}
+    }
+    if (matched.length > 0) return matched;
+    throw new Error('批量翻译解析 JSON 失败: ' + parseErr.message);
+  }
+  throw new Error('批量翻译返回数据非数组格式');
+}
+
+async function translateBatchGemini(items, targetLang, apiKey, modelName) {
+  if (!apiKey) throw new Error('未配置 Gemini API Key，请在设置中配置');
+  const cleanModel = (modelName || 'gemini-2.0-flash').replace(/^models\//, '');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
+  const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
+
+  const prompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
+严格遵循以下要求：
+1. 保持每一个对象的 "id" 字段与原始输入严格一致。
+2. 仅翻译 "text" 字段的内容。
+3. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
+4. 严禁包含任何 Markdown 标记（如 \`\`\`json ），严禁附加任何解释。
+待翻译数据：
+${JSON.stringify(items.map(i => ({ id: i.id, text: i.text })))}`;
+
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }]
+    })
+  }, 40000);
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || `Gemini API 错误: ${res.status}`);
+  }
+
+  const data = await res.json();
+  const rawContent = data.candidates && data.candidates[0]?.content?.parts[0]?.text?.trim();
+  if (!rawContent) throw new Error('Gemini 没有返回翻译内容');
+
+  let cleanJson = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleanJson);
+    if (Array.isArray(parsed)) {
+      return parsed.map(p => ({ id: p.id, text: p.text }));
+    }
+  } catch (e) {
+    const matched = [];
+    const objRegex = /\{"id"\s*:\s*([^,]+),\s*"text"\s*:\s*"((?:[^"\\]|\\.)*)"\}/g;
+    let match;
+    while ((match = objRegex.exec(cleanJson)) !== null) {
+      try {
+        const idVal = JSON.parse(match[1]);
+        const textVal = JSON.parse(`"${match[2]}"`);
+        matched.push({ id: idVal, text: textVal });
+      } catch (err) {}
+    }
+    if (matched.length > 0) return matched;
+    throw new Error('Gemini 批量翻译解析 JSON 失败');
+  }
+  throw new Error('Gemini 批量翻译返回数据非数组格式');
+}
+
+async function translateBatchGoogle(items, targetLang) {
+  // 并发请求翻译各个独立段落，彻底消除分隔符被误翻译（如_分割_标签）导致的串段与文字重叠
+  const results = new Array(items.length);
+  const CONCURRENCY = 6;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      if (idx >= items.length) break;
+      const item = items[idx];
+      try {
+        const trans = await translateGoogle(item.text, targetLang);
+        results[idx] = { id: item.id, text: trans || item.text };
+      } catch (err) {
+        results[idx] = { id: item.id, text: item.text };
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+async function translateBatchDeepL(items, targetLang, apiKey, customEndpoint) {
+  const langMap = { 'zh-CN': 'ZH', 'en': 'EN-US', 'ja': 'JA', 'ko': 'KO' };
+  const target = langMap[targetLang] || targetLang.toUpperCase();
+
+  if (apiKey && apiKey.trim()) {
+    const key = apiKey.trim();
+    const isFree = key.endsWith(':fx');
+    const defaultEndpoint = isFree ? 'https://api-free.deepl.com/v2/translate' : 'https://api.deepl.com/v2/translate';
+    const endpoint = (customEndpoint && customEndpoint.trim()) ? customEndpoint.trim() : defaultEndpoint;
+
+    const res = await fetchWithTimeout(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `DeepL-Auth-Key ${key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: items.map(i => i.text),
+        target_lang: target
+      })
+    }, 25000);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `DeepL API 错误: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (data.translations && Array.isArray(data.translations)) {
+      return items.map((item, idx) => ({
+        id: item.id,
+        text: data.translations[idx]?.text || item.text
+      }));
+    }
+    throw new Error('DeepL 未返回有效翻译文本');
+  }
+
+  // 免Key模式同样采用高并发独立通道，杜绝分隔符篡改
+  const results = new Array(items.length);
+  const CONCURRENCY = 4;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      if (idx >= items.length) break;
+      const item = items[idx];
+      try {
+        const trans = await translateDeepL(item.text, targetLang, '', customEndpoint);
+        results[idx] = { id: item.id, text: trans || item.text };
+      } catch (err) {
+        results[idx] = { id: item.id, text: item.text };
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+async function translateBatchGeneric(items, engine, targetLang, settings) {
+  const results = [];
+  const CONCURRENCY = 5;
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const current = items[idx++];
+      if (!current) break;
+      try {
+        let t = '';
+        if (engine === 'bing') t = await translateBing(current.text, targetLang);
+        else if (engine === 'youdao') t = await translateYoudao(current.text, targetLang, settings.youdaoAppKey, settings.youdaoAppSecret);
+        else t = await translateGoogle(current.text, targetLang);
+        results.push({ id: current.id, text: t });
+      } catch (e) {
+        results.push({ id: current.id, text: `[翻译失败: ${e.message}]` });
+      }
+    }
+  }
+  const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 // 辅助：从 Chat Endpoint 推导 Models Endpoint
 function deriveModelsUrl(endpoint, fallbackUrl) {
   let url = (endpoint && endpoint.trim()) ? endpoint.trim() : fallbackUrl;
@@ -620,6 +860,63 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return true; // 异步支持
   }
+
+  if (request.action === 'translateBatch') {
+    const { items, engine, targetLang, model } = request;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      sendResponse({ success: true, translations: [] });
+      return false;
+    }
+
+    chrome.storage.local.get({
+      glmApiKey: '',
+      glmActiveModel: 'glm-4-flash',
+      geminiApiKey: '',
+      geminiActiveModel: 'gemini-2.0-flash',
+      deepseekApiKey: '',
+      deepseekActiveModel: 'deepseek-chat',
+      deeplApiKey: '',
+      deeplEndpoint: '',
+      youdaoAppKey: '',
+      youdaoAppSecret: '',
+      customModels: []
+    }, (settings) => {
+      let batchPromise;
+
+      if (engine === 'google') {
+        batchPromise = translateBatchGoogle(items, targetLang);
+      } else if (engine === 'deepl') {
+        batchPromise = translateBatchDeepL(items, targetLang, settings.deeplApiKey, settings.deeplEndpoint);
+      } else if (engine === 'glm') {
+        batchPromise = translateBatchOpenAICompatible(items, targetLang, settings.glmApiKey, 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model || settings.glmActiveModel || 'glm-4-flash');
+      } else if (engine === 'gemini') {
+        batchPromise = translateBatchGemini(items, targetLang, settings.geminiApiKey, model || settings.geminiActiveModel || 'gemini-2.0-flash');
+      } else if (engine === 'deepseek') {
+        batchPromise = translateBatchOpenAICompatible(items, targetLang, settings.deepseekApiKey, 'https://api.deepseek.com/chat/completions', model || settings.deepseekActiveModel || 'deepseek-chat');
+      } else if (engine && engine.startsWith('custom_')) {
+        const customId = engine.substring(7);
+        const customModel = settings.customModels.find(m => m.id === customId);
+        if (customModel) {
+          batchPromise = translateBatchOpenAICompatible(items, targetLang, customModel.apiKey, customModel.endpoint, customModel.modelName);
+        } else {
+          batchPromise = Promise.reject(new Error('未找到该自定义模型的配置信息'));
+        }
+      } else {
+        batchPromise = translateBatchGeneric(items, engine, targetLang, settings);
+      }
+
+      Promise.resolve(batchPromise)
+        .then(translations => {
+          sendResponse({ success: true, translations });
+        })
+        .catch(err => {
+          sendResponse({ success: false, error: err.message });
+        });
+    });
+
+    return true; // 异步支持
+  }
 });
+
 
 

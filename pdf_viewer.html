@@ -50,6 +50,20 @@
           <button id="toggle-bilingual-btn" class="toolbar-btn" title="展开/收起左右双栏对照">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
           </button>
+
+          <!-- Top Level Bilingual Translation Actions (移至顶部导航，不挤占阅读区域) -->
+          <div id="trans-toolbar-actions" class="trans-toolbar-actions hidden">
+            <span id="trans-active-badge" class="trans-active-badge">未翻译</span>
+            <button id="toggle-trans-peek-btn" class="toolbar-btn" title="透视原图 (点击锁定，或长按 Alt 键)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
+            <button id="copy-all-trans-btn" class="toolbar-btn" title="复制全部译文">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+            <button id="export-bilingual-btn" class="toolbar-btn" title="导出离线双语对照网页 (可打印/另存为PDF)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </button>
+          </div>
         </div>
 
         <div class="divider"></div>
@@ -78,9 +92,6 @@
       <div class="viewer-workspace" id="viewer-workspace">
         <!-- Left: Original PDF Canvas & Text Layer -->
         <div class="pdf-pane pdf-pane-orig" id="pdf-pane">
-          <div class="pane-column-banner">
-            <span class="pane-banner-tag">原文 PDF</span>
-          </div>
           <div id="pdf-viewer-container" class="pdf-viewer-container hidden">
             <!-- Rendered original pages will be appended here -->
           </div>
@@ -88,42 +99,6 @@
 
         <!-- Right: Layout-Preserving Translated PDF Pane -->
         <div class="pdf-pane pdf-pane-trans hidden" id="translation-pane">
-          <div class="trans-pane-header">
-            <div class="trans-pane-title">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="3" x2="12" y2="21"></line></svg>
-              <span>原排版译文 PDF</span>
-              <span id="trans-active-badge" class="trans-active-badge">未翻译</span>
-            </div>
-            <div class="trans-pane-actions">
-              <!-- Font size scaling -->
-              <div class="trans-font-adjust-group" title="译文字号微调">
-                <button id="trans-font-dec-btn" class="trans-icon-btn font-size-btn" title="缩小译文字号">A-</button>
-                <span id="trans-font-scale-text" class="font-scale-text">100%</span>
-                <button id="trans-font-inc-btn" class="trans-icon-btn font-size-btn" title="放大译文字号">A+</button>
-              </div>
-
-              <!-- Opacity toggle -->
-              <button id="toggle-trans-opacity-btn" class="trans-icon-btn" title="切换译文底色透明度 (或长按 Alt 键随时透视原图)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v18"></path><path d="M12 8l4.5 4.5M12 13l3.5 3.5"></path></svg>
-              </button>
-
-              <!-- Persistent Peek Lock Toggle -->
-              <button id="toggle-trans-peek-btn" class="trans-icon-btn" title="常驻透视原图 (点击锁定/解除，或长按 Alt 键)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              </button>
-
-              <button id="copy-all-trans-btn" class="trans-icon-btn" title="复制全部译文">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-              </button>
-
-              <!-- Export Bilingual Document -->
-              <button id="export-bilingual-btn" class="trans-icon-btn" title="导出离线双语对照网页 (可打印/另存为PDF)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              </button>
-
-              <button id="close-trans-pane-btn" class="trans-icon-btn" title="收起对照栏">✕</button>
-            </div>
-          </div>
 
           <!-- Translation Progress Banner -->
           <div id="trans-progress-card" class="trans-progress-card hidden">
