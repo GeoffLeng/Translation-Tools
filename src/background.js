@@ -1,4 +1,104 @@
-// Background Service Worker for Lite Translate
+// Background Service Worker for Lite Translate (方案 A：内置 PDF.js 阅读器接管引擎)
+
+const DNR_PDF_RULE_ID = 2001;
+
+// 1. 判断是否为目标 PDF 地址 (避免重复接管及死循环)
+function isPdfUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const extBase = chrome.runtime.getURL('');
+  if (rawUrl.startsWith(extBase)) return false;
+  if (rawUrl.startsWith('chrome://') || rawUrl.startsWith('chrome-extension://')) return false;
+
+  const urlWithoutHash = rawUrl.split('#')[0];
+  const urlWithoutQuery = urlWithoutHash.split('?')[0].toLowerCase();
+
+  // 规则 1: 标准 .pdf 后缀
+  if (urlWithoutQuery.endsWith('.pdf')) return true;
+
+  // 规则 2: 学术库与开放获取 PDF 路由 (如 arXiv, Nature, ScienceDirect 等)
+  if (urlWithoutHash.toLowerCase().includes('/pdf/') || urlWithoutHash.toLowerCase().includes('.pdf?')) return true;
+
+  return false;
+}
+
+// 2. 动态更新 Declarative Net Request 拦截规则 (高效率毫秒级主框架零闪烁重定向)
+async function syncPdfDnrRules() {
+  if (!chrome.declarativeNetRequest) return;
+  chrome.storage.local.get({ pdfAction: 'extension' }, async (settings) => {
+    const shouldIntercept = (settings.pdfAction === 'extension');
+    try {
+      if (shouldIntercept) {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds: [DNR_PDF_RULE_ID],
+          addRules: [
+            {
+              id: DNR_PDF_RULE_ID,
+              priority: 1,
+              action: {
+                type: 'redirect',
+                redirect: {
+                  regexSubstitution: `${chrome.runtime.getURL('pdf_viewer.html')}?file=\\0`
+                }
+              },
+              condition: {
+                regexFilter: '^https?://[^?#]+\\.pdf($|[?#].*)',
+                resourceTypes: ['main_frame'],
+                excludedInitiatorDomains: [chrome.runtime.id]
+              }
+            }
+          ]
+        });
+      } else {
+        await chrome.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds: [DNR_PDF_RULE_ID]
+        });
+      }
+    } catch (err) {
+      console.warn('更新 DeclarativeNetRequest 动态规则异常:', err);
+    }
+  });
+}
+
+// 3. WebNavigation 顶级框架路由补充拦截 (捕获 arXiv/学术路由及本地 file:// 协议)
+if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
+  chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+    if (details.frameId !== 0) return; // 仅接管主窗口
+
+    const rawUrl = details.url;
+    if (!isPdfUrl(rawUrl)) return;
+
+    chrome.storage.local.get({ pdfAction: 'extension' }, (settings) => {
+      if (settings.pdfAction !== 'extension') return;
+
+      const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(rawUrl);
+
+      // 本地 file:// 协议处理
+      if (rawUrl.startsWith('file://')) {
+        chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+          if (isAllowed) {
+            chrome.tabs.update(details.tabId, { url: viewerUrl });
+          } else {
+            // 未开启本地文件权限时，发出友好提示
+            if (chrome.notifications) {
+              chrome.notifications.create({
+                type: 'basic',
+                iconUrl: 'icons/icon.svg',
+                title: 'Lite Translate - 本地 PDF 阅读',
+                message: '如需自动接管本地 PDF 文件，请在扩展管理页面开启“允许访问文件网址”。'
+              });
+            }
+          }
+        });
+        return;
+      }
+
+      // 针对带路由参数的网络 PDF 进行重定向
+      chrome.tabs.update(details.tabId, { url: viewerUrl });
+    });
+  });
+}
+
+// 初始化时创建上下文菜单及同步 DNR 规则
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'translateSelection',
@@ -8,9 +108,28 @@ chrome.runtime.onInstalled.addListener(() => {
 
   chrome.contextMenus.create({
     id: 'openPdfInExtension',
-    title: '在阅读器中打开此 PDF',
+    title: '在 Lite Translate 中打开此链接 PDF',
     contexts: ['link']
   });
+
+  chrome.contextMenus.create({
+    id: 'openCurrentPageInPdf',
+    title: '在 Lite Translate 阅读器中打开当前页面',
+    contexts: ['page']
+  });
+
+  syncPdfDnrRules();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  syncPdfDnrRules();
+});
+
+// 监听配置变更，动态启闭 PDF 拦截规则
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.pdfAction) {
+    syncPdfDnrRules();
+  }
 });
 
 // 右键菜单点击事件监听
@@ -20,19 +139,28 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       action: 'showSelectionTranslatePopup',
       text: info.selectionText
     }, () => {
+      // 若处于原生 PDF 等沙箱页面导致无法注入内容脚本，弹出微型独立查词窗兜底
       if (chrome.runtime.lastError) {
-        console.warn('无法向内容脚本发送消息：', chrome.runtime.lastError.message);
+        if (chrome.windows) {
+          chrome.windows.create({
+            url: chrome.runtime.getURL('popup.html') + '?text=' + encodeURIComponent(info.selectionText || ''),
+            type: 'popup',
+            width: 420,
+            height: 480
+          });
+        }
       }
     });
-  } else if (info.menuItemId === 'openPdfInExtension' && tab.id) {
+  } else if (info.menuItemId === 'openPdfInExtension') {
     const linkUrl = info.linkUrl;
     if (linkUrl) {
-      const cleanUrl = linkUrl.split('?')[0].split('#')[0].toLowerCase();
-      if (cleanUrl.endsWith('.pdf') || linkUrl.toLowerCase().includes('/pdf/')) {
-        const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(linkUrl);
-        chrome.tabs.create({ url: viewerUrl });
-      }
+      const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(linkUrl);
+      chrome.tabs.create({ url: viewerUrl });
     }
+  } else if (info.menuItemId === 'openCurrentPageInPdf' && tab && tab.url) {
+    const pageUrl = tab.url;
+    const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(pageUrl);
+    chrome.tabs.create({ url: viewerUrl });
   }
 });
 

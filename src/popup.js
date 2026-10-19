@@ -16,6 +16,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const settingsBtn = document.getElementById('settings-btn');
   const loadingSpinner = document.getElementById('loading-spinner');
   const currentEngineBadge = document.getElementById('current-engine-badge');
+  const pdfNavBtn = document.getElementById('pdf-nav-btn');
+
+  // 一键直达本地 PDF 沉浸式翻译 Web 页面
+  if (pdfNavBtn) {
+    pdfNavBtn.addEventListener('click', () => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        let viewerUrl = chrome.runtime.getURL('pdf_viewer.html');
+        if (tabs && tabs[0] && tabs[0].url) {
+          const tabUrl = tabs[0].url;
+          const cleanUrl = tabUrl.split('?')[0].split('#')[0].toLowerCase();
+          if (cleanUrl.endsWith('.pdf') || tabUrl.toLowerCase().includes('.pdf?') || tabUrl.toLowerCase().includes('/pdf/')) {
+            viewerUrl += '?file=' + encodeURIComponent(tabUrl);
+          }
+        }
+        chrome.tabs.create({ url: viewerUrl });
+        window.close();
+      });
+    });
+  }
 
   let debounceTimer;
 

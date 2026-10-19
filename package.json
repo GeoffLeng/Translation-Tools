@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node build.js"
+    "build": "node build.js",
+    "serve:pdf": "node server.js"
   },
   "devDependencies": {
     "vite": "^5.2.0"

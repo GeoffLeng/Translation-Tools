@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
       deeplEndpoint: '',
       youdaoAppKey: '',
       youdaoAppSecret: '',
-      pdfAction: 'ask',
+      pdfAction: 'extension',
       pdfContextMenu: true,
       customModels: []
     }, (settings) => {
@@ -134,9 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (youdaoAppKey) youdaoAppKey.value = settings.youdaoAppKey || '';
       if (youdaoAppSecret) youdaoAppSecret.value = settings.youdaoAppSecret || '';
 
-      if (pdfAction) pdfAction.value = settings.pdfAction;
+      if (pdfAction) pdfAction.value = settings.pdfAction || 'extension';
       if (pdfContextMenu) pdfContextMenu.checked = settings.pdfContextMenu;
       customModels = settings.customModels || [];
+
+      checkFileSchemeAccess();
 
       // 初始化智谱 GLM 模型状态
       ['glm'].forEach(p => {
@@ -506,6 +508,37 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         chrome.contextMenus.remove('openPdfInExtension');
       }
+    });
+  }
+
+  // --- 本地文件权限与阅读器一键启动 ---
+  const openExtensionManageBtn = document.getElementById('open-extension-manage-btn');
+  const openStandaloneViewerBtn = document.getElementById('open-standalone-viewer-btn');
+  const fileSchemeStatusDesc = document.getElementById('file-scheme-status-desc');
+
+  function checkFileSchemeAccess() {
+    if (chrome.extension && chrome.extension.isAllowedFileSchemeAccess && fileSchemeStatusDesc) {
+      chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+        if (isAllowed) {
+          fileSchemeStatusDesc.textContent = '已授权：Chrome 访问本地 PDF (file://) 时可自动无缝接管';
+          fileSchemeStatusDesc.style.color = '#34c759';
+        } else {
+          fileSchemeStatusDesc.textContent = '未授权：无法自动拦截本地文件，需在扩展管理页开启“允许访问文件网址”';
+          fileSchemeStatusDesc.style.color = '#ff9500';
+        }
+      });
+    }
+  }
+
+  if (openExtensionManageBtn) {
+    openExtensionManageBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+    });
+  }
+
+  if (openStandaloneViewerBtn) {
+    openStandaloneViewerBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('pdf_viewer.html') });
     });
   }
 

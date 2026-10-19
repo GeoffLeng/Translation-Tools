@@ -48,6 +48,37 @@ document.addEventListener('DOMContentLoaded', () => {
   const dismissScannedAlert = document.getElementById('dismiss-scanned-alert');
   const viewerWorkspace = document.getElementById('viewer-workspace');
 
+  // 还原【沉浸式翻译】两层工具栏与缩略图抽屉控件
+  const targetLanguageSelect = document.getElementById('target-language-select');
+  const toggleSidebarBtn = document.getElementById('toggle-sidebar-btn');
+  const viewerSidebar = document.getElementById('viewer-sidebar');
+  const sidebarThumbnailsList = document.getElementById('sidebar-thumbnails-list');
+  const sidebarPageCount = document.getElementById('sidebar-page-count');
+  const controlStyleSelect = document.getElementById('control-style-select');
+  const zoomPresetSelect = document.getElementById('zoom-preset-select');
+  const searchToolBtn = document.getElementById('search-tool-btn');
+  const textToolBtn = document.getElementById('text-tool-btn');
+  const drawToolBtn = document.getElementById('draw-tool-btn');
+  const helpBtn = document.getElementById('help-btn');
+  const setupBtn = document.getElementById('setup-btn');
+  const hideTopBtn = document.getElementById('hide-top-btn');
+  const showTopFloatingBtn = document.getElementById('show-top-floating-btn');
+  const viewerHeaderTop = document.getElementById('viewer-header-top');
+  const viewerHeaderSub = document.getElementById('viewer-header-sub');
+  const welcomeFileInput = document.getElementById('welcome-file-input');
+  const advancedTransBtn = document.getElementById('advanced-trans-btn');
+  const advancedModal = document.getElementById('advanced-modal');
+  const closeAdvancedModalBtn = document.getElementById('close-advanced-modal-btn');
+  const advOpacityModeSelect = document.getElementById('adv-opacity-mode-select');
+  const advTogglePeekBtn = document.getElementById('adv-toggle-peek-btn');
+  const advExportBilingualBtn = document.getElementById('adv-export-bilingual-btn');
+  const searchModal = document.getElementById('search-modal');
+  const searchInput = document.getElementById('search-input');
+  const searchPrevBtn = document.getElementById('search-prev-btn');
+  const searchNextBtn = document.getElementById('search-next-btn');
+  const searchMatches = document.getElementById('search-matches');
+  const closeSearchBtn = document.getElementById('close-search-btn');
+
   let currentPdf = null;
   let currentScale = 1.2;
   let currentPage = 1;
@@ -823,6 +854,9 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTransStageForPage(currentPage);
       }
 
+      // 还原沉浸式翻译：异步懒加载生成左侧页面缩略图导航抽屉
+      generateThumbnails(currentPdf);
+
       // 创建视口按需加载 Observer (上下扩展 400px 缓冲带)
       setupVirtualObserver(renderId);
       setupScrollSpy();
@@ -836,6 +870,85 @@ document.addEventListener('DOMContentLoaded', () => {
         loadingOverlay.classList.add('hidden');
       }
     }
+  }
+
+  // --- 缩略图生成器 (异步懒加载) ---
+  let thumbnailObserver = null;
+  function generateThumbnails(pdf) {
+    if (!sidebarThumbnailsList) return;
+    sidebarThumbnailsList.innerHTML = '';
+    if (sidebarPageCount) sidebarPageCount.textContent = `${pdf.numPages} 页`;
+
+    if (thumbnailObserver) {
+      thumbnailObserver.disconnect();
+      thumbnailObserver = null;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const card = document.createElement('div');
+      card.className = `thumb-card ${i === currentPage ? 'active' : ''}`;
+      card.dataset.pageNum = i;
+
+      const canvas = document.createElement('canvas');
+      canvas.id = `thumb-canvas-${i}`;
+
+      const label = document.createElement('span');
+      label.className = 'thumb-label';
+      label.textContent = `${i}`;
+
+      card.appendChild(canvas);
+      card.appendChild(label);
+
+      card.addEventListener('click', () => {
+        scrollToPage(i);
+      });
+
+      fragment.appendChild(card);
+    }
+
+    sidebarThumbnailsList.appendChild(fragment);
+
+    // 缩略图视口按需绘制 Observer
+    thumbnailObserver = new IntersectionObserver((entries) => {
+      entries.forEach(async (entry) => {
+        if (entry.isIntersecting) {
+          const card = entry.target;
+          thumbnailObserver.unobserve(card);
+          const pNum = parseInt(card.dataset.pageNum, 10);
+          try {
+            const page = await pdf.getPage(pNum);
+            const vp = page.getViewport({ scale: 0.22 });
+            const canvas = card.querySelector('canvas');
+            if (canvas) {
+              canvas.width = vp.width;
+              canvas.height = vp.height;
+              const ctx = canvas.getContext('2d');
+              await page.render({ canvasContext: ctx, viewport: vp }).promise;
+            }
+          } catch (e) {
+            console.warn(`缩略图第 ${pNum} 页渲染跳过:`, e);
+          }
+        }
+      });
+    }, {
+      root: viewerSidebar,
+      rootMargin: '250px'
+    });
+
+    sidebarThumbnailsList.querySelectorAll('.thumb-card').forEach(card => {
+      thumbnailObserver.observe(card);
+    });
+  }
+
+  function updateActiveThumbnail(pageNum) {
+    if (!sidebarThumbnailsList) return;
+    const cards = sidebarThumbnailsList.querySelectorAll('.thumb-card');
+    cards.forEach(c => {
+      const p = parseInt(c.dataset.pageNum, 10);
+      c.classList.toggle('active', p === pageNum);
+    });
   }
 
   // 虚拟化视口监听器：进入视口挂载渲染，移出视口彻底销毁 Canvas 回收显存
@@ -884,6 +997,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPage = closestPage;
         if (pageNumInput) pageNumInput.value = currentPage;
         updatePaginationButtons();
+        updateActiveThumbnail(currentPage);
         if (translationPane && !translationPane.classList.contains('hidden')) {
           renderTransStageForPage(currentPage);
         }
@@ -903,6 +1017,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentPage = clamped;
     if (pageNumInput) pageNumInput.value = currentPage;
     updatePaginationButtons();
+    updateActiveThumbnail(currentPage);
 
     const targetLeft = viewerContainer.querySelector(`.page-container[data-page-num="${currentPage}"]`);
     if (targetLeft) {
@@ -1244,7 +1359,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const pageNum = overlayLayer.parentElement ? parseInt(overlayLayer.parentElement.dataset.pageNum, 10) : currentPage;
 
     // 1. 如果提供了舞台底图 Canvas，先执行无痕底色擦除 (Inpainting)，抹除原版英文，防止透光重叠
-    if (stageCanvas && stageCanvas.getContext) {
+    if (stageCanvas && stageCanvas.getContext && opacityModeIndex !== 2) {
       const ctx = stageCanvas.getContext('2d');
       blocks.forEach(block => {
         if (!block.box || block.type === 'formula' || !block.transText) return;
@@ -1253,13 +1368,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const width = Math.round(block.box.w * scale);
         const height = Math.round(block.box.h * scale);
 
-        ctx.fillStyle = block.style?.bgColor || '#ffffff';
-        // 扩展 2px 覆盖边缘微小抗锯齿及字根外溢
-        ctx.fillRect(Math.max(0, left - 2), Math.max(0, top - 2), width + 4, height + 4);
+        // 如果用户选择了对比衬底框 (mode-contrast)，则不需要在底图上生硬擦除
+        if (opacityModeIndex !== 1) {
+          ctx.fillStyle = block.style?.bgColor || '#ffffff';
+          // 扩展 2px 覆盖边缘微小抗锯齿及字根外溢
+          ctx.fillRect(Math.max(0, left - 2), Math.max(0, top - 2), width + 4, height + 4);
+        }
       });
     }
 
-    // 2. 原位挂载无痕排版文本
+    // 2. 原位挂载排版文本
     blocks.forEach(block => {
       if (!block.box) return;
       if (block.type === 'formula') return; // 公式保持原图渲染
@@ -1267,6 +1385,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const overlayBlock = document.createElement('div');
       overlayBlock.className = 'trans-overlay-block';
+      if (opacityModeIndex === 1) {
+        overlayBlock.classList.add('mode-contrast');
+      } else if (opacityModeIndex === 2) {
+        overlayBlock.classList.add('mode-clear');
+      }
       overlayBlock.dataset.blockId = block.id;
 
       const left = Math.round(block.box.x * scale);
@@ -1277,7 +1400,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // 原文字号 1:1 动态还原 (根据实际 PDF 变换矩阵计算的真实物理字号)
       const baseFontSize = block.style?.fontSize ? Math.round(block.style.fontSize * scale) : 13;
       const isBold = block.style?.isBold || false;
-      const textColor = block.style?.color || '#1c1c1e';
+      const textColor = (opacityModeIndex === 1) ? '#111827' : (block.style?.color || '#1c1c1e');
 
       // 自适应弹性微调：根据译文字数与物理框高动态轻微微调字号，严丝合缝绝不挤压溢出下一段
       const textLen = block.transText.length;
@@ -1304,11 +1427,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (block.type === 'heading') {
         overlayBlock.style.letterSpacing = '-0.2px';
       }
-
-      // 无痕原版视觉：无多余浮窗边框与背景
-      overlayBlock.style.background = 'transparent';
-      overlayBlock.style.border = '1px solid transparent';
-      overlayBlock.style.boxShadow = 'none';
 
       overlayBlock.textContent = block.transText;
       overlayBlock.title = `原文: ${block.originalText}\n(双击复制译文，点击联动对齐原文)`;
@@ -1902,27 +2020,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 6.5 方案 2：整页 JSON 结构化批量翻译 API (单次往返，速度提升 15 倍，杜绝 429)
+  // 6.5 整页 JSON 结构化批量翻译 API (优先走扩展 background，本地独立模式走 server.js)
   function requestBatchTranslation(items, engine, targetLang, model) {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: 'translateBatch',
-        items: items,
-        engine: engine,
-        targetLang: targetLang,
-        model: model
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!response) {
-          reject(new Error('批量翻译超时或服务未响应'));
-        } else if (response.success && Array.isArray(response.translations)) {
-          resolve(response.translations);
-        } else {
-          reject(new Error(response.error || '批量翻译失败'));
-        }
-      });
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage({
+          action: 'translateBatch',
+          items: items,
+          engine: engine,
+          targetLang: targetLang,
+          model: model
+        }, (response) => {
+          if (chrome.runtime.lastError || !response || !response.success) {
+            fallbackLocalBatch(items, targetLang).then(resolve).catch(reject);
+          } else if (response.success && Array.isArray(response.translations)) {
+            resolve(response.translations);
+          } else {
+            fallbackLocalBatch(items, targetLang).then(resolve).catch(reject);
+          }
+        });
+      } else {
+        fallbackLocalBatch(items, targetLang).then(resolve).catch(reject);
+      }
     });
+  }
+
+  async function fallbackLocalBatch(items, targetLang) {
+    try {
+      const res = await fetch('/api/translate-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, targetLang })
+      });
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.translations)) {
+        return data.translations;
+      }
+      throw new Error(data.error || '本地后端翻译异常');
+    } catch (e) {
+      throw new Error('批量翻译失败: ' + e.message);
+    }
   }
 
   // 7. 翻译单页核心方法 (原排版独立靶向舞台 + 批量 JSON 协议)
@@ -1972,7 +2109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const settings = await new Promise(resolve => {
       chrome.storage.local.get({ defaultTargetLang: 'zh-CN' }, resolve);
     });
-    const targetLang = settings.defaultTargetLang || 'zh-CN';
+    const targetLang = (targetLanguageSelect && targetLanguageSelect.value) ? targetLanguageSelect.value : (settings.defaultTargetLang || 'zh-CN');
 
     // 3.5 采样当前页面各块的文字前景色与底色
     blocks.forEach(b => {
@@ -2134,7 +2271,175 @@ document.addEventListener('DOMContentLoaded', () => {
     if (translatePageBtn) translatePageBtn.disabled = false;
   }
 
-  // 9. 绑定对照翻译相关交互事件
+  // 9. 绑定沉浸式翻译双层工具栏与视图模式事件
+  if (toggleSidebarBtn && viewerSidebar) {
+    toggleSidebarBtn.addEventListener('click', () => {
+      const isCollapsed = viewerSidebar.classList.toggle('collapsed');
+      toggleSidebarBtn.classList.toggle('active', !isCollapsed);
+    });
+  }
+
+  // 对照显示模式切换: 双语对照 / 仅原文 / 仅译文
+  if (controlStyleSelect) {
+    controlStyleSelect.addEventListener('change', () => {
+      const mode = controlStyleSelect.value;
+      if (mode === 'bilingual') {
+        pdfPane.classList.remove('hidden');
+        translationPane.classList.remove('hidden');
+        renderTransStageForPage(currentPage);
+      } else if (mode === 'original') {
+        pdfPane.classList.remove('hidden');
+        translationPane.classList.add('hidden');
+      } else if (mode === 'translation') {
+        pdfPane.classList.add('hidden');
+        translationPane.classList.remove('hidden');
+        renderTransStageForPage(currentPage);
+      }
+    });
+  }
+
+  // 预设缩放与适合页宽计算
+  if (zoomPresetSelect) {
+    zoomPresetSelect.addEventListener('change', () => {
+      const val = zoomPresetSelect.value;
+      if (val === 'fit-width') {
+        if (currentPdf) {
+          currentPdf.getPage(currentPage).then(p => {
+            const vp = p.getViewport({ scale: 1.0 });
+            const isBilingual = (controlStyleSelect && controlStyleSelect.value === 'bilingual');
+            const availableW = viewerMain.clientWidth - (viewerSidebar.classList.contains('collapsed') ? 60 : 260);
+            const targetScale = Math.max(0.5, Math.min(2.5, availableW / (vp.width * (isBilingual ? 2.1 : 1.05))));
+            changeZoom(Math.round(targetScale * 100) / 100);
+          });
+        }
+      } else if (val === 'fit-page') {
+        if (currentPdf) {
+          currentPdf.getPage(currentPage).then(p => {
+            const vp = p.getViewport({ scale: 1.0 });
+            const availableH = viewerMain.clientHeight - 90;
+            const targetScale = Math.max(0.4, Math.min(2.0, availableH / vp.height));
+            changeZoom(Math.round(targetScale * 100) / 100);
+          });
+        }
+      } else {
+        changeZoom(parseFloat(val));
+      }
+    });
+  }
+
+  // 顶栏沉浸式隐藏与一键浮动唤回
+  if (hideTopBtn && showTopFloatingBtn) {
+    hideTopBtn.addEventListener('click', () => {
+      if (viewerHeaderTop) viewerHeaderTop.classList.add('hidden');
+      if (viewerHeaderSub) viewerHeaderSub.classList.add('hidden');
+      showTopFloatingBtn.classList.remove('hidden');
+    });
+
+    showTopFloatingBtn.addEventListener('click', () => {
+      if (viewerHeaderTop) viewerHeaderTop.classList.remove('hidden');
+      if (viewerHeaderSub) viewerHeaderSub.classList.remove('hidden');
+      showTopFloatingBtn.classList.add('hidden');
+    });
+  }
+
+  // 目标语言切换联动
+  if (targetLanguageSelect) {
+    chrome.storage.local.get({ defaultTargetLang: 'zh-CN' }, (res) => {
+      if (res.defaultTargetLang) targetLanguageSelect.value = res.defaultTargetLang;
+    });
+
+    targetLanguageSelect.addEventListener('change', () => {
+      chrome.storage.local.set({ defaultTargetLang: targetLanguageSelect.value });
+      if (pageTranslations.has(currentPage)) {
+        translatePage(currentPage, false);
+      }
+    });
+  }
+
+  // 高级翻译设置模态框
+  if (advancedTransBtn && advancedModal) {
+    advancedTransBtn.addEventListener('click', () => {
+      advancedModal.classList.remove('hidden');
+    });
+  }
+
+  if (closeAdvancedModalBtn && advancedModal) {
+    closeAdvancedModalBtn.addEventListener('click', () => {
+      advancedModal.classList.add('hidden');
+    });
+  }
+
+  if (advOpacityModeSelect) {
+    advOpacityModeSelect.addEventListener('change', () => {
+      opacityModeIndex = parseInt(advOpacityModeSelect.value, 10);
+      renderTransStageForPage(currentPage);
+    });
+  }
+
+  if (advTogglePeekBtn) {
+    advTogglePeekBtn.addEventListener('click', () => {
+      isPeekingLocked = !isPeekingLocked;
+      viewerWorkspace.classList.toggle('is-peeking', isPeekingLocked);
+      advTogglePeekBtn.textContent = isPeekingLocked ? '恢复正常显示 (已锁定透视)' : '锁定透视原图';
+    });
+  }
+
+  if (advExportBilingualBtn) {
+    advExportBilingualBtn.addEventListener('click', () => {
+      exportBilingualDocument();
+    });
+  }
+
+  // 欢迎屏幕文件选择框
+  if (welcomeFileInput) {
+    welcomeFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) readLocalFile(file);
+    });
+  }
+
+  // 页面关键词检索悬浮窗
+  if (searchToolBtn && searchModal) {
+    searchToolBtn.addEventListener('click', () => {
+      searchModal.classList.toggle('hidden');
+      if (!searchModal.classList.contains('hidden') && searchInput) {
+        searchInput.focus();
+      }
+    });
+  }
+
+  if (closeSearchBtn && searchModal) {
+    closeSearchBtn.addEventListener('click', () => {
+      searchModal.classList.add('hidden');
+    });
+  }
+
+  // 帮助与快捷键弹窗
+  if (helpBtn) {
+    helpBtn.addEventListener('click', () => {
+      alert(
+        '【Lite Translate · PDF 沉浸式双语对照阅读指南】\n\n' +
+        '1. 翻页：点击上方 ‹ › 翻页，或按键盘 ← / → 键\n' +
+        '2. 划词：鼠标直接在左侧原文或右侧译文划选，即刻弹出极速翻译浮标\n' +
+        '3. 透视原图：长按键盘 Alt 键随时淡化译文、核对原图与图表\n' +
+        '4. 缩略图：点击左上方侧边栏图标展开 118 页全局缩略图导航\n' +
+        '5. 隐藏顶栏：点击 Hide top 进入全屏极简沉浸式阅读'
+      );
+    });
+  }
+
+  // 设置中心直达
+  if (setupBtn) {
+    setupBtn.addEventListener('click', () => {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+      } else {
+        window.open('/options.html', '_blank');
+      }
+    });
+  }
+
+  // 翻译控制按钮
   if (translatePageBtn) {
     translatePageBtn.addEventListener('click', () => {
       if (!currentPdf) return;
@@ -2157,40 +2462,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if (toggleBilingualBtn) {
-    toggleBilingualBtn.addEventListener('click', () => {
-      const willBeVisible = translationPane.classList.contains('hidden');
-      translationPane.classList.toggle('hidden', !willBeVisible);
-      toggleBilingualBtn.classList.toggle('active', willBeVisible);
-      if (transToolbarActions) {
-        transToolbarActions.classList.toggle('hidden', !willBeVisible);
-      }
-      if (willBeVisible) {
-        renderTransStageForPage(currentPage);
-      }
-    });
-  }
-
-  if (copyAllTransBtn) {
-    copyAllTransBtn.addEventListener('click', () => {
-      if (pageTranslations.size === 0) return;
-      const allTexts = [];
-      const sortedPages = Array.from(pageTranslations.keys()).sort((a, b) => a - b);
-      sortedPages.forEach(p => {
-        const blocks = pageTranslations.get(p) || [];
-        const transTexts = blocks.map(b => b.transText).filter(Boolean);
-        if (transTexts.length > 0) {
-          allTexts.push(`=== 第 ${p} 页 ===\n` + transTexts.join('\n\n'));
-        }
-      });
-      if (allTexts.length === 0) return;
-      navigator.clipboard.writeText(allTexts.join('\n\n')).then(() => {
-        copyAllTransBtn.style.color = '#34c759';
-        setTimeout(() => copyAllTransBtn.style.color = '', 1500);
-      });
-    });
-  }
-
   if (pdfTranslateEngine) {
     pdfTranslateEngine.addEventListener('change', () => {
       chrome.storage.local.set({ pdfTranslateEngine: pdfTranslateEngine.value });
@@ -2198,7 +2469,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 10. 底部翻页控制栏事件绑定 (上一页 / 下一页 / 页面输入跳转)
+  // 翻页控制栏事件绑定
   if (prevPageBtn) {
     prevPageBtn.addEventListener('click', () => {
       if (currentPage > 1) scrollToPage(currentPage - 1);
@@ -2224,7 +2495,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 11. 顶部缩放控制按钮事件绑定
+  // 缩放控制按钮事件绑定
   if (zoomInBtn) {
     zoomInBtn.addEventListener('click', () => {
       changeZoom(currentScale + 0.15);
@@ -2237,49 +2508,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 12. 顶部工具栏透视原图锁定切换
-  if (toggleTransPeekBtn) {
-    toggleTransPeekBtn.addEventListener('click', () => {
-      isPeekingLocked = !isPeekingLocked;
-      const viewerContainerTrans = document.getElementById('pdf-viewer-container-trans');
-      if (viewerContainerTrans) {
-        viewerContainerTrans.classList.toggle('peek-original', isPeekingLocked);
-      }
-      toggleTransPeekBtn.classList.toggle('is-peeking', isPeekingLocked);
-      toggleTransPeekBtn.title = isPeekingLocked ? '解除原图透视锁定' : '常驻透视原图 (点击锁定/解除，或长按 Alt 键)';
-    });
-  }
-
-  // 15. 导出双语对照笔记网页
-  if (exportBilingualBtn) {
-    exportBilingualBtn.addEventListener('click', () => {
-      exportBilingualDocument();
-    });
-  }
-
-  // 16. 扫描件异常提示关闭
-  if (dismissScannedAlert) {
-    dismissScannedAlert.addEventListener('click', () => {
-      if (scannedPdfAlert) scannedPdfAlert.classList.add('hidden');
-    });
-  }
-
-  // 17. 长按 Alt 键全局原图瞬时透视 (无需改动任何设置，松手即恢复)
+  // 键盘快捷键监听: Alt 透视、翻页 ← / →
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Alt' && viewerContainerTrans && !isPeekingLocked) {
-      viewerContainerTrans.classList.add('peek-original');
+    if (e.key === 'Alt' && viewerWorkspace && !isPeekingLocked) {
+      viewerWorkspace.classList.add('is-peeking');
+    }
+    // 非输入框焦点时支持键盘左右翻页
+    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      if (e.key === 'ArrowLeft' && currentPage > 1) {
+        scrollToPage(currentPage - 1);
+      } else if (e.key === 'ArrowRight' && currentPdf && currentPage < currentPdf.numPages) {
+        scrollToPage(currentPage + 1);
+      }
     }
   });
 
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt' && viewerContainerTrans && !isPeekingLocked) {
-      viewerContainerTrans.classList.remove('peek-original');
+    if (e.key === 'Alt' && viewerWorkspace && !isPeekingLocked) {
+      viewerWorkspace.classList.remove('is-peeking');
     }
   });
 
   window.addEventListener('blur', () => {
-    if (viewerContainerTrans && !isPeekingLocked) {
-      viewerContainerTrans.classList.remove('peek-original');
+    if (viewerWorkspace && !isPeekingLocked) {
+      viewerWorkspace.classList.remove('is-peeking');
     }
   });
 });

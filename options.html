@@ -163,28 +163,42 @@
 
       <!-- PDF Settings Tab -->
       <section id="pdf-settings-tab" class="tab-pane">
-        <h1 class="page-title">PDF 阅读器设置</h1>
+        <h1 class="page-title">PDF 阅读器与自动接管设置</h1>
         <div class="ios-card">
           <div class="setting-item">
             <div class="setting-info">
-              <span class="setting-title">当在浏览器打开 PDF 时</span>
-              <span class="setting-desc">配置扩展如何处理 PDF 文档链接</span>
+              <span class="setting-title">自动接管浏览器打开的 PDF 链接</span>
+              <span class="setting-desc">访问网络 PDF 链接时，自动重定向至内置双语阅读器 (沙拉查词/沉浸式翻译同款)</span>
             </div>
             <select id="pdf-action" class="ios-select">
-              <option value="ask">弹窗询问是否用扩展打开</option>
-              <option value="native">使用浏览器默认打开</option>
-              <option value="extension">默认直接用本扩展打开</option>
+              <option value="extension">自动接管并打开双语阅读器 (推荐)</option>
+              <option value="ask">在工具栏弹出提示询问</option>
+              <option value="native">不接管，保持 Chrome 原生阅读器</option>
             </select>
           </div>
           <div class="setting-item">
             <div class="setting-info">
-              <span class="setting-title">在右键菜单添加“使用扩展阅读 PDF”</span>
-              <span class="setting-desc">右键点击网页 PDF 链接可快捷用扩展阅读</span>
+              <span class="setting-title">右键菜单增强</span>
+              <span class="setting-desc">右键点击网页 PDF 链接或页面空白处时，展示快捷打开与翻译入口</span>
             </div>
             <label class="ios-switch">
               <input type="checkbox" id="pdf-context-menu" checked>
               <span class="slider"></span>
             </label>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">本地文件 (file://) 访问权限状态</span>
+              <span class="setting-desc" id="file-scheme-status-desc">正在检测本地文件权限...</span>
+            </div>
+            <button type="button" id="open-extension-manage-btn" class="ios-button secondary-btn" style="padding: 6px 14px; font-size: 12.5px;">管理扩展权限</button>
+          </div>
+          <div class="setting-item" style="border-bottom: none;">
+            <div class="setting-info">
+              <span class="setting-title">独立沉浸式 PDF 阅读器</span>
+              <span class="setting-desc">随时在新标签页中启动本地 PDF 翻译页面</span>
+            </div>
+            <button type="button" id="open-standalone-viewer-btn" class="ios-button primary-btn" style="padding: 6px 14px; font-size: 12.5px;">打开阅读器</button>
           </div>
         </div>
       </section>
