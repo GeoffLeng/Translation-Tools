@@ -28,6 +28,14 @@ pnpm-debug.log*
 key.json
 keys.json
 
+# Test PDFs & Large Document Reports (prevent copyright & large file issues)
+*.pdf
+report/
+
+# User-specific runtime data (keep templates in repo)
+server/data/user_glossary.json
+!server/data/user_glossary.example.json
+
 
 # IDE & Editor settings
 .vscode/

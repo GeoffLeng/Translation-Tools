@@ -235,18 +235,20 @@
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">服务商预设</span>
         <select id="modal-provider" class="ios-select" style="width: 100%; padding: 10px; background-position: right 14px center;">
-          <option value="openrouter">OpenRouter (推荐·全模型聚合/多免费模型)</option>
-          <option value="opencode">OpenCode</option>
+          <option value="deepseek">DeepSeek (官方推荐 - deepseek-chat / reasoner)</option>
+          <option value="openrouter">OpenRouter (全模型聚合/多免费模型)</option>
           <option value="openai">OpenAI (官方 / 代理)</option>
           <option value="siliconflow">硅基流动 (SiliconFlow)</option>
           <option value="groq">Groq (极速推理引擎)</option>
-          <option value="custom">自定义 (OpenAI 兼容 / 本地 Ollama)</option>
+          <option value="opencode">OpenCode</option>
+          <option value="ollama">本地 Ollama (http://localhost:11434)</option>
+          <option value="custom">自定义 (OpenAI 兼容接口)</option>
         </select>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">接口地址 (Chat Endpoint)</span>
-        <input type="text" id="modal-endpoint" placeholder="https://openrouter.ai/api/v1/chat/completions" class="ios-input">
+        <input type="text" id="modal-endpoint" placeholder="https://api.deepseek.com/chat/completions" class="ios-input">
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 6px;">
@@ -263,22 +265,45 @@
         <span id="modal-fetch-status" class="model-status-text" style="min-height: 16px;"></span>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 6px; position: relative;">
+      <!-- 模型选择与添加区域 (支持搜索过滤后一键勾选添加，默认0勾选) -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">模型名称 (Model ID)</span>
-          <span style="font-size: 11px; color: #8e8e93;">输入可模糊搜索，或直接手动填写</span>
+          <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">选择模型 (Model ID)</span>
+          <span id="modal-selected-count-badge" style="font-size: 11px; color: #007AFF; font-weight: 600;">已选 0 个</span>
         </div>
-        <input type="text" id="modal-model-name" placeholder="输入关键字搜索受支持模型，或直接填写" class="ios-input" autocomplete="off">
-        <!-- 模糊搜索下拉候选框 -->
-        <div id="modal-model-dropdown" class="model-dropdown-list hidden"></div>
+
+        <!-- 已选模型标签展示区 (默认无模型时不占位) -->
+        <div id="modal-selected-tags" class="modal-selected-tags-container hidden"></div>
+
+        <!-- 搜索与手动添加输入行 -->
+        <div style="display: flex; gap: 6px;">
+          <input type="text" id="modal-model-name" placeholder="搜索可用模型，或输入自定义 ID..." class="ios-input" style="flex: 1;" autocomplete="off">
+          <button type="button" id="modal-manual-add-model-btn" class="ios-button secondary-btn" style="padding: 0 14px; font-size: 12.5px; white-space: nowrap;">+ 添加</button>
+        </div>
+
+        <!-- 模型选择面板 (默认收起，获取模型后展开，默认一个都不选) -->
+        <div id="modal-model-picker" class="modal-model-picker hidden">
+          <div class="modal-picker-header">
+            <span id="modal-picker-summary">可用模型列表 (点击模型右侧“+ 添加”)</span>
+            <button type="button" id="modal-clear-selected-btn" style="font-size: 11px; cursor: pointer; border: none; background: none; color: #8e8e93;">清空已选</button>
+          </div>
+          <div id="modal-picker-list" class="modal-picker-list"></div>
+        </div>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <span style="font-size: 13px; font-weight: 500; color: #3a3a3c;">显示名称 (别名)</span>
-        <input type="text" id="modal-custom-alias" placeholder="例如: OpenRouter - Claude 3.5 (选填)" class="ios-input">
+        <input type="text" id="modal-custom-alias" placeholder="例如: DeepSeek - V3 (选填，多选时自动按前缀生成)" class="ios-input">
       </div>
 
-      <button id="modal-save-btn" class="modal-btn primary" style="width: 100%; padding: 12px; border-radius: 12px; font-weight: 600; cursor: pointer; border: none; color: white; background: linear-gradient(135deg, #0A84FF, #5E5CE6); margin-top: 6px;">保存并添加模型</button>
+      <div style="display: flex; gap: 10px; margin-top: 8px;">
+        <button type="button" id="modal-test-btn" class="modal-btn secondary" style="flex: 1; padding: 12px; border-radius: 12px; font-weight: 600; cursor: pointer; border: 1px solid #d1d5db; background: #f3f4f6; color: #374151; display: flex; align-items: center; justify-content: center; gap: 6px;">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+          <span>测试连接</span>
+        </button>
+        <button id="modal-save-btn" class="modal-btn primary" style="flex: 2; padding: 12px; border-radius: 12px; font-weight: 600; cursor: pointer; border: none; color: white; background: linear-gradient(135deg, #0A84FF, #5E5CE6);">保存并添加模型</button>
+      </div>
+      <div id="modal-test-status" class="model-status-text" style="min-height: 18px; margin-top: 4px; font-size: 12px; text-align: center;"></div>
     </div>
   </div>
 

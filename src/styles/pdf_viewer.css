@@ -1230,3 +1230,89 @@ input:checked + .slider:before {
   transition: opacity 0.2s, transform 0.2s;
   pointer-events: none;
 }
+
+/* --------------------------------------------------------------------------
+   Smart Global Tooltip (交互图标悬停解释小浮窗)
+   -------------------------------------------------------------------------- */
+.pdf-smart-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 290px;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pdf-smart-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pdf-smart-tooltip .tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.pdf-smart-tooltip .tooltip-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pdf-smart-tooltip .tooltip-shortcut {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(255, 255, 255, 0.14);
+  color: #e2e8f0;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.pdf-smart-tooltip .tooltip-desc {
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* 角色选择器控件样式 */
+.persona-select-group {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-right: 6px;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.persona-select-group:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.persona-select-box {
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  outline: none;
+  padding: 2px 4px;
+}

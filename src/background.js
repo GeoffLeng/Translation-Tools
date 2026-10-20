@@ -497,8 +497,8 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
   throw new Error('API 没有返回有效的翻译文本内容');
 }
 
-// 3.5 结构化批量翻译逻辑 (Batch Context Prompting)
-async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoint, modelName) {
+// 3.5 结构化批量翻译逻辑 (Batch Context Prompting + 滑动窗口跨页断句补齐)
+async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoint, modelName, context = null, isBioChem = false) {
   if (!apiKey) throw new Error('该服务未配置 API Key，请在设置中配置');
   if (!endpoint) throw new Error('接口地址未配置');
 
@@ -511,12 +511,30 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
     'X-Title': 'Lite Translate'
   };
 
-  const systemPrompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
+  let systemPrompt = isBioChem
+    ? `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
+请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。
+学术翻译强制要求：
+1. 术语严格符合《中国化学会命名原则》与全国科学技术名词审定委员会《生物化学名词》标准。
+2. 严禁字面硬翻实验标准方法 (如 Western blot 必须译为 免疫印迹法，严禁译为西部污点；RT-qPCR 译为 逆转录定量PCR；Apoptosis 译为 细胞凋亡；Enantiomer 译为 对映异构体；Chiral 译为 手性)。
+3. 英文弱被动句应转换为符合中文自然学术文献习惯的客观表述。
+4. 保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`
+    : `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
 严格遵循以下要求：
 1. 保持每一个对象的 "id" 字段与原始输入严格一致。
-2. 仅翻译 "text" 字段的内容，专业术语翻译需严谨规范。
+2. 仅翻译 "text" 字段的内容，专业学术术语翻译需严谨规范。
 3. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
 4. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释、前导词或注脚。`;
+
+  if (context && (context.prefix || context.suffix)) {
+    systemPrompt += `\n\n【重要：跨页上下文语境参考 (用于消除跨页断句与代词歧义)】
+${context.prefix ? `【前置页面末尾上下文 (仅作为理解上文代词、断句参考，绝对不要翻译此部分)】:\n${context.prefix}\n` : ''}
+${context.suffix ? `【后置页面开头上下文 (仅作为理解下文句意、断句参考，绝对不要翻译此部分)】:\n${context.suffix}\n` : ''}
+跨页约束：
+- 待翻译的 JSON 数组是当前页面的正文。
+- 如果当前页开头是上一页未结束的从句/短语，请结合【前置页面末尾上下文】将其译为通顺中文；
+- 如果当前页末尾句子尚未结束，请结合【后置页面开头上下文】理解完整句意后，仅将当前页所含部分准确翻译，绝对严禁将后置上下文的内容输出在当前页的译文中！`;
+  }
 
   const userPrompt = JSON.stringify(items.map(item => ({ id: item.id, text: item.text })));
 
@@ -573,19 +591,27 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
   throw new Error('批量翻译返回数据非数组格式');
 }
 
-async function translateBatchGemini(items, targetLang, apiKey, modelName) {
+async function translateBatchGemini(items, targetLang, apiKey, modelName, context = null) {
   if (!apiKey) throw new Error('未配置 Gemini API Key，请在设置中配置');
   const cleanModel = (modelName || 'gemini-2.0-flash').replace(/^models\//, '');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
 
-  const prompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
+  let prompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
 严格遵循以下要求：
 1. 保持每一个对象的 "id" 字段与原始输入严格一致。
 2. 仅翻译 "text" 字段的内容。
 3. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
-4. 严禁包含任何 Markdown 标记（如 \`\`\`json ），严禁附加任何解释。
-待翻译数据：
+4. 严禁包含任何 Markdown 标记（如 \`\`\`json ），严禁附加任何解释。`;
+
+  if (context && (context.prefix || context.suffix)) {
+    prompt += `\n\n【跨页上下文语境参考】
+${context.prefix ? `【前置页面末尾参考 (仅供理解上文，严禁翻译输出)】:\n${context.prefix}\n` : ''}
+${context.suffix ? `【后置页面开头参考 (仅供理解下文，严禁翻译输出)】:\n${context.suffix}\n` : ''}
+跨页约束：仅翻译下方待翻译数据，结合前后参考消除断句与代词歧义，绝对严禁夹带输出前后参考内容！`;
+  }
+
+  prompt += `\n待翻译数据：
 ${JSON.stringify(items.map(i => ({ id: i.id, text: i.text })))}`;
 
   const res = await fetchWithTimeout(url, {
@@ -810,22 +836,34 @@ async function fetchProviderModels(provider, apiKey, customEndpoint) {
       .filter(id => !id.includes('embedding') && !id.includes('aqa'));
   }
 
-  // 3) DeepSeek (官方预置)
+  // 3) DeepSeek (官方预置与自定义端点)
   if (provider === 'deepseek') {
-    const res = await fetchWithTimeout('https://api.deepseek.com/models', {
+    const url = deriveModelsUrl(customEndpoint, 'https://api.deepseek.com/models');
+    const res = await fetchWithTimeout(url, {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     }, 12000);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `DeepSeek 请求失败: HTTP ${res.status}`);
+      const msg = err.error?.message || err.message || '';
+      throw new Error(`DeepSeek 鉴权失败 (HTTP ${res.status}): ${msg || '请核对 DeepSeek API Key 是否正确'}`);
     }
     const data = await res.json();
     if (!data.data || !Array.isArray(data.data)) throw new Error('DeepSeek 未返回模型列表');
-    return data.data.map(m => m.id);
+    return data.data.map(m => typeof m === 'string' ? { id: m, name: m } : { id: m.id, name: m.name || m.id });
   }
 
   // 4) OpenRouter
   if (provider === 'openrouter') {
+    // 强制验证 API Key 的真实归属与有效性，防止将 DeepSeek 等其他服务商 Key 误当 OpenRouter Key 产生虚假成功
+    const authRes = await fetchWithTimeout('https://openrouter.ai/api/v1/auth/key', {
+      headers: defaultHeaders
+    }, 10000);
+    if (!authRes.ok) {
+      const authErr = await authRes.json().catch(() => ({}));
+      const msg = authErr.error?.message || authErr.message || `HTTP ${authRes.status}`;
+      throw new Error(`OpenRouter 鉴权失败 (${msg}): 该密钥非有效 OpenRouter Key。若您使用的是 DeepSeek 密钥，请在上方“服务商预设”中选择 DeepSeek`);
+    }
+
     const res = await fetchWithTimeout('https://openrouter.ai/api/v1/models', {
       headers: defaultHeaders
     }, 15000);
@@ -918,6 +956,101 @@ async function fetchProviderModels(provider, apiKey, customEndpoint) {
   throw new Error('不支持的服务商: ' + provider);
 }
 
+// 4.5 测试模型连接与密钥有效性 (极低 token 消耗: 发送 1 字符测试探针并限制 1 token 输出)
+async function testModelConnection({ provider, endpoint, apiKey, modelName }) {
+  if (!apiKey && provider !== 'ollama') {
+    throw new Error('请先输入 API Key');
+  }
+
+  let targetEndpoint = (endpoint && endpoint.trim()) ? endpoint.trim() : '';
+  if (!targetEndpoint) {
+    if (provider === 'deepseek') targetEndpoint = 'https://api.deepseek.com/chat/completions';
+    else if (provider === 'openrouter') targetEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
+    else if (provider === 'openai') targetEndpoint = 'https://api.openai.com/v1/chat/completions';
+    else if (provider === 'siliconflow') targetEndpoint = 'https://api.siliconflow.cn/v1/chat/completions';
+    else if (provider === 'groq') targetEndpoint = 'https://api.groq.com/openai/v1/chat/completions';
+    else if (provider === 'opencode') targetEndpoint = 'https://api.opencode.ai/v1/chat/completions';
+    else if (provider === 'ollama') targetEndpoint = 'http://localhost:11434/v1/chat/completions';
+    else throw new Error('请填写接口地址 (Chat Endpoint)');
+  }
+
+  if (!targetEndpoint.startsWith('http://') && !targetEndpoint.startsWith('https://')) {
+    targetEndpoint = 'https://' + targetEndpoint;
+  }
+
+  // 智能推测探活模型 ID
+  let targetModel = (modelName && modelName.trim()) ? modelName.trim() : '';
+  if (!targetModel) {
+    if (provider === 'deepseek') targetModel = 'deepseek-chat';
+    else if (provider === 'openrouter') targetModel = 'google/gemini-2.0-flash-001';
+    else if (provider === 'openai') targetModel = 'gpt-4o-mini';
+    else if (provider === 'siliconflow') targetModel = 'deepseek-ai/DeepSeek-V3';
+    else if (provider === 'groq') targetModel = 'llama-3.3-70b-versatile';
+    else if (provider === 'opencode') targetModel = 'claude-3-5-sonnet';
+    else if (provider === 'ollama') targetModel = 'llama3';
+    else targetModel = 'gpt-3.5-turbo';
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'HTTP-Referer': 'https://github.com/GeoffLeng/Translation-Tools',
+    'X-Title': 'Lite Translate'
+  };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+  }
+
+  // 极轻量探测包：仅 1 词输入 + 强制限制输出 1 token，将 Token 消耗压缩至理论极限 (<=2 tokens)
+  const probePayload = {
+    model: targetModel,
+    messages: [{ role: 'user', content: 'hi' }],
+    max_tokens: 1,
+    stream: false
+  };
+
+  const startTime = performance.now();
+  let res;
+  try {
+    res = await fetchWithTimeout(targetEndpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(probePayload)
+    }, 15000);
+  } catch (netErr) {
+    throw new Error(`连接失败 (${netErr.message})，请检查网络或代理设置`);
+  }
+
+  const durationMs = Math.round(performance.now() - startTime);
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const rawMsg = errBody.error?.message || errBody.message || '';
+    if (res.status === 401) {
+      throw new Error(`认证失败 (401 Unauthorized): API Key 无效或未与当前接口地址匹配。${rawMsg ? `[${rawMsg}]` : ''}`);
+    } else if (res.status === 404) {
+      throw new Error(`接口地址未找到 (404 Not Found): 请确认 Chat Endpoint 是否正确填写（通常需以 /chat/completions 结尾）`);
+    } else if (res.status === 429) {
+      throw new Error(`请求受限 (429 Too Many Requests): 账户额度不足 (Insufficient Quota) 或调用频次超限。${rawMsg ? `[${rawMsg}]` : ''}`);
+    } else if (res.status === 400) {
+      throw new Error(`参数异常 (400 Bad Request): ${rawMsg || '所选模型名称不存在或该接口不支持该参数'}`);
+    } else {
+      throw new Error(`接口响应错误 (HTTP ${res.status}): ${rawMsg || res.statusText}`);
+    }
+  }
+
+  const data = await res.json();
+  if (!data || (!data.choices && !data.id && !data.created)) {
+    throw new Error('接口响应格式异常 (未包含标准 Chat Completion 数据结构)');
+  }
+
+  return {
+    success: true,
+    latency: durationMs,
+    model: targetModel,
+    message: `连接成功 (耗时: ${durationMs}ms, 模型: ${targetModel})`
+  };
+}
+
 // 5. 监听 runtime 消息
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'fetchModels') {
@@ -925,6 +1058,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     fetchProviderModels(provider, apiKey, endpoint)
       .then(models => {
         sendResponse({ success: true, models });
+      })
+      .catch(err => {
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
+  if (request.action === 'testModelConnection') {
+    const { provider, apiKey, endpoint, modelName } = request;
+    testModelConnection({ provider, endpoint, apiKey, modelName })
+      .then(result => {
+        sendResponse(result);
       })
       .catch(err => {
         sendResponse({ success: false, error: err.message });
@@ -990,7 +1135,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'translateBatch') {
-    const { items, engine, targetLang, model } = request;
+    const { items, engine, targetLang, model, context, isBioChem } = request;
     if (!items || !Array.isArray(items) || items.length === 0) {
       sendResponse({ success: true, translations: [] });
       return false;
@@ -1016,16 +1161,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else if (engine === 'deepl') {
         batchPromise = translateBatchDeepL(items, targetLang, settings.deeplApiKey, settings.deeplEndpoint);
       } else if (engine === 'glm') {
-        batchPromise = translateBatchOpenAICompatible(items, targetLang, settings.glmApiKey, 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model || settings.glmActiveModel || 'glm-4-flash');
+        batchPromise = translateBatchOpenAICompatible(items, targetLang, settings.glmApiKey, 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model || settings.glmActiveModel || 'glm-4-flash', context, isBioChem);
       } else if (engine === 'gemini') {
-        batchPromise = translateBatchGemini(items, targetLang, settings.geminiApiKey, model || settings.geminiActiveModel || 'gemini-2.0-flash');
+        batchPromise = translateBatchGemini(items, targetLang, settings.geminiApiKey, model || settings.geminiActiveModel || 'gemini-2.0-flash', context);
       } else if (engine === 'deepseek') {
-        batchPromise = translateBatchOpenAICompatible(items, targetLang, settings.deepseekApiKey, 'https://api.deepseek.com/chat/completions', model || settings.deepseekActiveModel || 'deepseek-chat');
+        batchPromise = translateBatchOpenAICompatible(items, targetLang, settings.deepseekApiKey, 'https://api.deepseek.com/chat/completions', model || settings.deepseekActiveModel || 'deepseek-chat', context, isBioChem);
       } else if (engine && engine.startsWith('custom_')) {
         const customId = engine.substring(7);
         const customModel = settings.customModels.find(m => m.id === customId);
         if (customModel) {
-          batchPromise = translateBatchOpenAICompatible(items, targetLang, customModel.apiKey, customModel.endpoint, customModel.modelName);
+          batchPromise = translateBatchOpenAICompatible(items, targetLang, customModel.apiKey, customModel.endpoint, customModel.modelName, context, isBioChem);
         } else {
           batchPromise = Promise.reject(new Error('未找到该自定义模型的配置信息'));
         }

@@ -5,6 +5,8 @@ import path from 'path';
 import url from 'url';
 import https from 'https';
 import { fileURLToPath } from 'url';
+import { handleBioTranslate } from './server/routes/translate_bio.js';
+import { loadAllTerms, addCustomTerm } from './server/engine/term_matcher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,7 +66,7 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
-  // 1. API: 批量翻译代理接口
+// 1. API: 批量翻译代理接口
   if (pathname === '/api/translate-batch' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);
@@ -95,6 +97,87 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 1.5 API: 生化前沿学术文献高精度翻译专用接口 (含实体保护 + 权威术语注入 + 滑动窗口)
+  if (pathname === '/api/translate/bio' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        const result = await handleBioTranslate(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 1.6 API: 获取本地权威术语库与用户词库列表 (支持 ?persona=biochem | economics | general)
+  if (pathname === '/api/terms' && req.method === 'GET') {
+    try {
+      const persona = parsedUrl.query?.persona || 'biochem';
+      const terms = loadAllTerms(persona);
+      const termKeys = Object.keys(terms);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        success: true,
+        persona: persona,
+        totalCount: termKeys.length,
+        disciplinesCount: persona === 'biochem' ? 13 : (persona === 'economics' ? 4 : 0),
+        termsSample: termKeys.slice(0, 50).map(k => {
+          const val = terms[k];
+          return typeof val === 'object'
+            ? { term: k, en: val.en || k, zh: val.zh, abbr: val.abbr, category: val.category, otherLangs: val.otherLangs }
+            : { term: k, en: k, zh: val };
+        })
+      }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+    return;
+  }
+
+  // 1.7 API: 获取系统支持的所有翻译专家角色及语料库概要
+  if (pathname === '/api/personas' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      success: true,
+      personas: [
+        { id: 'general', name: '默认通用翻译', desc: '符合大众日常阅读习惯，无专业语料束缚，极速流畅自然', termCount: 0 },
+        { id: 'biochem', name: '生化学术专家', desc: '收录3100+权威生化术语库，严格执行中国化学会规范与CAS/酶切保护', termCount: 3105 },
+        { id: 'economics', name: '经济学专家', desc: '涵盖宏微观、金融工程、量化投资与计量经济学权威术语及顶刊规范', termCount: 97 }
+      ]
+    }));
+    return;
+  }
+
+  // 1.8 API: 向本地词库新增用户自定义学术词条
+  if (pathname === '/api/terms/add' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const { englishTerm, chineseTranslation, category } = JSON.parse(body);
+        const ok = addCustomTerm(englishTerm, chineseTranslation, category);
+        if (ok) {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, message: `已成功保存词条: ${englishTerm} -> ${chineseTranslation}` }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: false, error: '词条内容不能为空' }));
+        }
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
       }
     });
     return;

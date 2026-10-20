@@ -58,39 +58,72 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalToggleKey = document.getElementById('modal-toggle-key');
   const modalFetchModelsBtn = document.getElementById('modal-fetch-models-btn');
   const modalFetchStatus = document.getElementById('modal-fetch-status');
+  const modalSelectedCountBadge = document.getElementById('modal-selected-count-badge');
+  const modalSelectedTags = document.getElementById('modal-selected-tags');
   const modalModelName = document.getElementById('modal-model-name');
-  const modalModelDropdown = document.getElementById('modal-model-dropdown');
+  const modalManualAddModelBtn = document.getElementById('modal-manual-add-model-btn');
+  const modalModelPicker = document.getElementById('modal-model-picker');
+  const modalPickerSummary = document.getElementById('modal-picker-summary');
+  const modalClearSelectedBtn = document.getElementById('modal-clear-selected-btn');
+  const modalPickerList = document.getElementById('modal-picker-list');
   const modalCustomAlias = document.getElementById('modal-custom-alias');
+  const modalTestBtn = document.getElementById('modal-test-btn');
+  const modalTestStatus = document.getElementById('modal-test-status');
   const modalSaveBtn = document.getElementById('modal-save-btn');
 
   let customModels = [];
   let modalFetchedModels = []; // 暂存从第三方服务商拉取的模型列表 [{ id, name }]
+  let selectedModelMap = new Map(); // 用户主动选择的模型集合 Map(id => { id, name })
 
   // 常用服务商模板预设
   const PROVIDER_TEMPLATES = {
+    deepseek: {
+      endpoint: 'https://api.deepseek.com/chat/completions',
+      aliasPrefix: 'DeepSeek',
+      defaultModel: 'deepseek-chat',
+      placeholder: 'sk-... (DeepSeek 官方 API Key)'
+    },
     openrouter: {
       endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-      aliasPrefix: 'OpenRouter'
-    },
-    opencode: {
-      endpoint: 'https://api.opencode.ai/v1/chat/completions',
-      aliasPrefix: 'OpenCode'
+      aliasPrefix: 'OpenRouter',
+      defaultModel: 'google/gemini-2.0-flash-001',
+      placeholder: 'sk-or-v1-... (OpenRouter API Key)'
     },
     openai: {
       endpoint: 'https://api.openai.com/v1/chat/completions',
-      aliasPrefix: 'OpenAI'
+      aliasPrefix: 'OpenAI',
+      defaultModel: 'gpt-4o-mini',
+      placeholder: 'sk-...'
     },
     siliconflow: {
       endpoint: 'https://api.siliconflow.cn/v1/chat/completions',
-      aliasPrefix: 'SiliconFlow'
+      aliasPrefix: 'SiliconFlow',
+      defaultModel: 'deepseek-ai/DeepSeek-V3',
+      placeholder: 'sk-...'
     },
     groq: {
       endpoint: 'https://api.groq.com/openai/v1/chat/completions',
-      aliasPrefix: 'Groq'
+      aliasPrefix: 'Groq',
+      defaultModel: 'llama-3.3-70b-versatile',
+      placeholder: 'gsk_...'
+    },
+    opencode: {
+      endpoint: 'https://api.opencode.ai/v1/chat/completions',
+      aliasPrefix: 'OpenCode',
+      defaultModel: 'claude-3-5-sonnet',
+      placeholder: 'sk-...'
+    },
+    ollama: {
+      endpoint: 'http://localhost:11434/v1/chat/completions',
+      aliasPrefix: 'Ollama',
+      defaultModel: 'llama3',
+      placeholder: '无需填写 (或填任意字符)'
     },
     custom: {
       endpoint: '',
-      aliasPrefix: 'Custom'
+      aliasPrefix: 'Custom',
+      defaultModel: '',
+      placeholder: '输入 API Key'
     }
   };
 
@@ -453,11 +486,43 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="display:flex; flex-direction:column; gap:2px;">
           <span style="font-weight:600; color:#1c1c1e;">${m.name} <span style="font-size:10.5px; font-weight:normal; background:rgba(0,122,255,0.1); color:#007AFF; padding:1px 6px; border-radius:4px; margin-left:4px;">${m.modelName}</span></span>
           <span style="font-size:11.5px; color:#8e8e93; font-family:monospace; max-width: 320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.endpoint}</span>
+          <span class="custom-item-status" style="font-size:11px; margin-top:2px;"></span>
         </div>
-        <button class="ios-button" style="background:rgba(255,59,48,0.1); color:#FF3B30; padding:6px 12px; font-size:12.5px;" data-id="${m.id}">删除</button>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button class="ios-button secondary-btn custom-item-test-btn" style="padding:5px 10px; font-size:12px;" data-id="${m.id}">测试</button>
+          <button class="ios-button custom-item-delete-btn" style="background:rgba(255,59,48,0.1); color:#FF3B30; padding:5px 10px; font-size:12px;" data-id="${m.id}">删除</button>
+        </div>
       `;
 
-      item.querySelector('button').addEventListener('click', () => {
+      const testBtn = item.querySelector('.custom-item-test-btn');
+      const deleteBtn = item.querySelector('.custom-item-delete-btn');
+      const statusSpan = item.querySelector('.custom-item-status');
+
+      testBtn.addEventListener('click', () => {
+        testBtn.disabled = true;
+        statusSpan.textContent = '测试中...';
+        statusSpan.style.color = '#007AFF';
+
+        chrome.runtime.sendMessage({
+          action: 'testModelConnection',
+          provider: 'custom',
+          apiKey: m.apiKey,
+          endpoint: m.endpoint,
+          modelName: m.modelName
+        }, (res) => {
+          testBtn.disabled = false;
+          if (chrome.runtime.lastError || !res || !res.success) {
+            const err = res?.error || chrome.runtime.lastError?.message || '测试失败';
+            statusSpan.textContent = `✗ ${err}`;
+            statusSpan.style.color = '#FF3B30';
+          } else {
+            statusSpan.textContent = `✓ ${res.message || '连接正常'}`;
+            statusSpan.style.color = '#34C759';
+          }
+        });
+      });
+
+      deleteBtn.addEventListener('click', () => {
         deleteCustomModel(m.id);
       });
 
@@ -545,26 +610,59 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- 自定义模型弹窗逻辑 ---
   function openCustomModal() {
     customModelModal.classList.remove('hidden');
-    // 默认选用 OpenRouter 模板
+    // 默认选用 DeepSeek 官方推荐模板
     if (modalProvider) {
-      modalProvider.value = 'openrouter';
-      applyProviderTemplate('openrouter');
+      modalProvider.value = 'deepseek';
+      applyProviderTemplate('deepseek');
     }
   }
 
   function applyProviderTemplate(providerKey) {
     const tmpl = PROVIDER_TEMPLATES[providerKey] || PROVIDER_TEMPLATES.custom;
     modalEndpoint.value = tmpl.endpoint;
+    if (tmpl.placeholder) {
+      modalApiKey.placeholder = tmpl.placeholder;
+    }
+    if (tmpl.defaultModel) {
+      modalModelName.placeholder = `搜索或输入模型，推荐: ${tmpl.defaultModel}`;
+    } else {
+      modalModelName.placeholder = '搜索可用模型，或输入自定义 ID...';
+    }
     modalFetchStatus.textContent = '';
     modalFetchStatus.className = 'model-status-text';
-    modalModelDropdown.classList.add('hidden');
-    modalModelDropdown.innerHTML = '';
+    if (modalTestStatus) {
+      modalTestStatus.textContent = '';
+      modalTestStatus.className = 'model-status-text';
+    }
+    if (modalModelPicker) modalModelPicker.classList.add('hidden');
+    if (modalPickerList) modalPickerList.innerHTML = '';
     modalFetchedModels = [];
+    selectedModelMap.clear();
+    updateSelectedUI();
   }
 
   if (modalProvider) {
     modalProvider.addEventListener('change', () => {
       applyProviderTemplate(modalProvider.value);
+    });
+  }
+
+  // 智能识别粘贴的 API Key 前缀并自动同步服务商预设
+  if (modalApiKey) {
+    modalApiKey.addEventListener('input', () => {
+      const val = modalApiKey.value.trim();
+      if (!val) return;
+      if (val.startsWith('sk-or-v1-')) {
+        if (modalProvider && modalProvider.value !== 'openrouter') {
+          modalProvider.value = 'openrouter';
+          applyProviderTemplate('openrouter');
+        }
+      } else if (val.startsWith('gsk_')) {
+        if (modalProvider && modalProvider.value !== 'groq') {
+          modalProvider.value = 'groq';
+          applyProviderTemplate('groq');
+        }
+      }
     });
   }
 
@@ -578,9 +676,226 @@ document.addEventListener('DOMContentLoaded', () => {
     modalCustomAlias.value = '';
     modalFetchStatus.textContent = '';
     modalFetchStatus.className = 'model-status-text';
-    modalModelDropdown.classList.add('hidden');
-    modalModelDropdown.innerHTML = '';
+    if (modalTestStatus) {
+      modalTestStatus.textContent = '';
+      modalTestStatus.className = 'model-status-text';
+    }
+    if (modalModelPicker) modalModelPicker.classList.add('hidden');
+    if (modalPickerList) modalPickerList.innerHTML = '';
     modalFetchedModels = [];
+    selectedModelMap.clear();
+    updateSelectedUI();
+  }
+
+  // 更新已选模型 Tags 与计数徽标
+  function updateSelectedUI() {
+    const count = selectedModelMap.size;
+    if (modalSelectedCountBadge) {
+      modalSelectedCountBadge.textContent = `已选 ${count} 个`;
+      modalSelectedCountBadge.style.color = count > 0 ? '#10b981' : '#007AFF';
+    }
+
+    if (modalSaveBtn) {
+      if (count > 0) {
+        modalSaveBtn.textContent = `保存已选模型 (${count} 个)`;
+      } else {
+        modalSaveBtn.textContent = '保存并添加模型';
+      }
+    }
+
+    if (!modalSelectedTags) return;
+
+    if (count === 0) {
+      modalSelectedTags.innerHTML = '';
+      modalSelectedTags.classList.add('hidden');
+      return;
+    }
+
+    modalSelectedTags.classList.remove('hidden');
+    modalSelectedTags.innerHTML = '';
+
+    selectedModelMap.forEach((item, id) => {
+      const chip = document.createElement('span');
+      chip.className = 'selected-model-chip';
+      chip.innerHTML = `
+        <span>${id}</span>
+        <button type="button" class="chip-remove-btn" title="移除此模型">✕</button>
+      `;
+
+      chip.querySelector('.chip-remove-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedModelMap.delete(id);
+        updateSelectedUI();
+        renderModelPicker(modalModelName ? modalModelName.value.trim() : '');
+      });
+
+      modalSelectedTags.appendChild(chip);
+    });
+  }
+
+  // 渲染模型列表面板及过滤结果 (支持海量模型极速过滤，避免超大DOM卡顿)
+  function renderModelPicker(query) {
+    if (!modalModelPicker || !modalPickerList) return;
+
+    if (!modalFetchedModels || modalFetchedModels.length === 0) {
+      modalModelPicker.classList.add('hidden');
+      return;
+    }
+
+    modalModelPicker.classList.remove('hidden');
+
+    const q = (query || '').toLowerCase().trim();
+    const filtered = q
+      ? modalFetchedModels.filter(m => (m.id && m.id.toLowerCase().includes(q)) || (m.name && m.name.toLowerCase().includes(q)))
+      : modalFetchedModels;
+
+    if (modalPickerSummary) {
+      if (q) {
+        modalPickerSummary.textContent = `搜索匹配: ${filtered.length} / 共 ${modalFetchedModels.length} 个模型`;
+      } else {
+        modalPickerSummary.textContent = `可用模型列表 (共 ${modalFetchedModels.length} 个，默认未选)`;
+      }
+    }
+
+    modalPickerList.innerHTML = '';
+
+    if (filtered.length === 0) {
+      const emptyTip = document.createElement('div');
+      emptyTip.className = 'picker-empty-tip';
+      emptyTip.textContent = `未搜索到匹配模型。点击右上角“+ 添加”可直接添加 “${query}” 为自定义 ID`;
+      modalPickerList.appendChild(emptyTip);
+      return;
+    }
+
+    // 默认未输入搜索词时展示前 80 项，有搜索词展示前 50 项
+    const maxShow = q ? 50 : 80;
+    const toRender = filtered.slice(0, maxShow);
+
+    toRender.forEach(item => {
+      const isSelected = selectedModelMap.has(item.id);
+      const row = document.createElement('div');
+      row.className = 'picker-item';
+      row.innerHTML = `
+        <div class="picker-item-info">
+          <span class="picker-item-id">${item.id}</span>
+          ${item.name && item.name !== item.id ? `<span class="picker-item-desc">${item.name}</span>` : ''}
+        </div>
+        <button type="button" class="picker-add-btn ${isSelected ? 'added' : ''}">
+          ${isSelected ? '✓ 已添加' : '+ 添加'}
+        </button>
+      `;
+
+      const btn = row.querySelector('.picker-add-btn');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (selectedModelMap.has(item.id)) {
+          selectedModelMap.delete(item.id);
+        } else {
+          selectedModelMap.set(item.id, { id: item.id, name: item.name || item.id });
+        }
+        updateSelectedUI();
+        renderModelPicker(modalModelName ? modalModelName.value.trim() : '');
+      });
+
+      modalPickerList.appendChild(row);
+    });
+
+    if (filtered.length > maxShow) {
+      const moreTip = document.createElement('div');
+      moreTip.style.padding = '8px 12px';
+      moreTip.style.fontSize = '11px';
+      moreTip.style.color = '#8e8e93';
+      moreTip.style.textAlign = 'center';
+      moreTip.style.background = '#f8fafc';
+      moreTip.textContent = `已显示前 ${maxShow} 个模型，在上方搜索框输入关键词可精准过滤全部 ${filtered.length} 个模型`;
+      modalPickerList.appendChild(moreTip);
+    }
+  }
+
+  // 搜索框输入过滤
+  if (modalModelName) {
+    modalModelName.addEventListener('input', () => {
+      renderModelPicker(modalModelName.value.trim());
+    });
+  }
+
+  // 手动添加单个模型
+  if (modalManualAddModelBtn) {
+    modalManualAddModelBtn.addEventListener('click', () => {
+      const manualId = modalModelName ? modalModelName.value.trim() : '';
+      if (!manualId) {
+        alert('请在输入框中输入模型 ID！');
+        return;
+      }
+      selectedModelMap.set(manualId, { id: manualId, name: manualId });
+      modalModelName.value = '';
+      updateSelectedUI();
+      renderModelPicker('');
+    });
+  }
+
+  // 一键清空已选
+  if (modalClearSelectedBtn) {
+    modalClearSelectedBtn.addEventListener('click', () => {
+      selectedModelMap.clear();
+      updateSelectedUI();
+      renderModelPicker(modalModelName ? modalModelName.value.trim() : '');
+    });
+  }
+
+  // 一键测试连接 (消耗 <= 2 tokens 极轻量探测)
+  if (modalTestBtn) {
+    modalTestBtn.addEventListener('click', () => {
+      const provider = modalProvider ? modalProvider.value : 'custom';
+      const apiKey = modalApiKey.value.trim();
+      const endpoint = modalEndpoint.value.trim();
+      let modelName = modalModelName ? modalModelName.value.trim() : '';
+
+      // 若未输入模型名称，但已勾选模型，优先测试已选模型中的首个
+      if (!modelName && selectedModelMap.size > 0) {
+        modelName = Array.from(selectedModelMap.keys())[0];
+      }
+
+      if (!apiKey && provider !== 'ollama') {
+        modalTestStatus.textContent = '请先输入 API Key 再进行测试';
+        modalTestStatus.className = 'model-status-text error';
+        return;
+      }
+
+      if (!endpoint && provider === 'custom') {
+        modalTestStatus.textContent = '自定义服务商请先输入接口地址';
+        modalTestStatus.className = 'model-status-text error';
+        return;
+      }
+
+      modalTestBtn.disabled = true;
+      modalTestStatus.textContent = '正在发送极简探测包 (1 token) 验证连通性与密钥...';
+      modalTestStatus.className = 'model-status-text loading';
+
+      chrome.runtime.sendMessage({
+        action: 'testModelConnection',
+        provider,
+        apiKey,
+        endpoint,
+        modelName
+      }, (response) => {
+        modalTestBtn.disabled = false;
+        if (chrome.runtime.lastError || !response || !response.success) {
+          const errMsg = response?.error || chrome.runtime.lastError?.message || '测试失败';
+          modalTestStatus.textContent = `✗ ${errMsg}`;
+          modalTestStatus.className = 'model-status-text error';
+        } else {
+          modalTestStatus.textContent = `✓ ${response.message || '连接测试通过'}`;
+          modalTestStatus.className = 'model-status-text success';
+
+          // 若未选模型且未填模型，自动将测试通过的模型加入已选
+          if (selectedModelMap.size === 0 && !modalModelName.value.trim() && response.model) {
+            selectedModelMap.set(response.model, { id: response.model, name: response.model });
+            updateSelectedUI();
+          }
+        }
+      });
+    });
   }
 
   closeCustomModalBtn.addEventListener('click', closeCustomModal);
@@ -654,105 +969,84 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      modalFetchStatus.textContent = `成功获取 ${modalFetchedModels.length} 个模型，可在下方模糊搜索选择`;
+      // 关键原则：海量模型默认一个都不勾选，由用户搜索挑选
+      selectedModelMap.clear();
+      updateSelectedUI();
+
+      modalFetchStatus.textContent = `成功获取 ${modalFetchedModels.length} 个模型 (默认未选)，可在下方搜索后点击 [+ 添加]`;
       modalFetchStatus.className = 'model-status-text success';
 
-      renderFuzzyDropdown(modalModelName.value.trim());
+      renderModelPicker('');
+      if (modalModelName) {
+        modalModelName.value = '';
+        modalModelName.focus();
+      }
     });
   });
 
-  // 渲染模糊搜索下拉框
-  function renderFuzzyDropdown(query) {
-    if (!modalFetchedModels || modalFetchedModels.length === 0) {
-      modalModelDropdown.classList.add('hidden');
-      return;
-    }
-
-    const q = (query || '').toLowerCase().trim();
-    const filtered = q
-      ? modalFetchedModels.filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
-      : modalFetchedModels;
-
-    modalModelDropdown.innerHTML = '';
-
-    if (filtered.length === 0) {
-      const emptyDiv = document.createElement('div');
-      emptyDiv.className = 'model-dropdown-empty';
-      emptyDiv.textContent = '无精确匹配模型（可直接手动输入任意模型 ID）';
-      modalModelDropdown.appendChild(emptyDiv);
-      modalModelDropdown.classList.remove('hidden');
-      return;
-    }
-
-    const toRender = filtered.slice(0, 40);
-    toRender.forEach(item => {
-      const row = document.createElement('div');
-      row.className = 'model-dropdown-item';
-      row.innerHTML = `
-        <span class="model-dropdown-item-id">${item.id}</span>
-        ${item.name && item.name !== item.id ? `<span class="model-dropdown-item-desc">${item.name}</span>` : ''}
-      `;
-      row.addEventListener('click', () => {
-        modalModelName.value = item.id;
-        if (!modalCustomAlias.value.trim()) {
-          const providerKey = modalProvider ? modalProvider.value : 'custom';
-          const prefix = PROVIDER_TEMPLATES[providerKey]?.aliasPrefix || '';
-          modalCustomAlias.value = prefix ? `${prefix} - ${item.name || item.id}` : (item.name || item.id);
-        }
-        modalModelDropdown.classList.add('hidden');
-      });
-      modalModelDropdown.appendChild(row);
-    });
-
-    modalModelDropdown.classList.remove('hidden');
-  }
-
-  modalModelName.addEventListener('input', () => {
-    renderFuzzyDropdown(modalModelName.value.trim());
-  });
-
-  modalModelName.addEventListener('focus', () => {
-    if (modalFetchedModels.length > 0) {
-      renderFuzzyDropdown(modalModelName.value.trim());
-    }
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!modalModelDropdown.contains(e.target) && e.target !== modalModelName) {
-      modalModelDropdown.classList.add('hidden');
-    }
-  });
-
-  // 保存自定义模型
+  // 保存自定义模型 (支持从已选模型批量入库，或保存单项)
   modalSaveBtn.addEventListener('click', () => {
     const endpoint = modalEndpoint.value.trim();
     const apiKey = modalApiKey.value.trim();
-    const modelName = modalModelName.value.trim();
     const customAlias = modalCustomAlias.value.trim();
+    const providerKey = modalProvider ? modalProvider.value : 'custom';
+    const prefix = PROVIDER_TEMPLATES[providerKey]?.aliasPrefix || '自定义';
 
-    if (!endpoint || !modelName) {
-      alert('请填写完整的接口地址和模型名称！');
+    if (!endpoint) {
+      alert('请填写完整的接口地址 (Endpoint)！');
       return;
     }
 
-    const providerKey = modalProvider ? modalProvider.value : 'custom';
-    const prefix = PROVIDER_TEMPLATES[providerKey]?.aliasPrefix || '自定义';
-    const displayName = customAlias || `${prefix} - ${modelName}`;
+    // 情况 A：用户勾选了一个或多个模型
+    if (selectedModelMap.size > 0) {
+      let addedCount = 0;
+      selectedModelMap.forEach((item, modelId) => {
+        const exists = customModels.some(m => m.endpoint === endpoint && m.modelName === modelId);
+        if (!exists) {
+          const displayName = customAlias
+            ? (selectedModelMap.size === 1 ? customAlias : `${customAlias} - ${modelId}`)
+            : `${prefix} - ${item.name || modelId}`;
+          customModels.push({
+            id: (Date.now() + Math.floor(Math.random() * 10000)).toString(),
+            name: displayName,
+            endpoint,
+            apiKey,
+            modelName: modelId
+          });
+          addedCount++;
+        }
+      });
 
-    const newModel = {
-      id: Date.now().toString(),
-      name: displayName,
-      endpoint,
-      apiKey,
-      modelName
-    };
+      chrome.storage.local.set({ customModels }, () => {
+        renderCustomModels();
+        renderDefaultEngineOptions();
+        closeCustomModal();
+      });
+      return;
+    }
 
-    customModels.push(newModel);
-    chrome.storage.local.set({ customModels }, () => {
-      renderCustomModels();
-      renderDefaultEngineOptions();
-      closeCustomModal();
-    });
+    // 情况 B：用户没有在列表中勾选，但是在输入框中手动填写了模型 ID
+    const singleModelName = modalModelName ? modalModelName.value.trim() : '';
+    if (singleModelName) {
+      const displayName = customAlias || `${prefix} - ${singleModelName}`;
+      const newModel = {
+        id: Date.now().toString(),
+        name: displayName,
+        endpoint,
+        apiKey,
+        modelName: singleModelName
+      };
+      customModels.push(newModel);
+      chrome.storage.local.set({ customModels }, () => {
+        renderCustomModels();
+        renderDefaultEngineOptions();
+        closeCustomModal();
+      });
+      return;
+    }
+
+    // 情况 C：既没有选模型，也没有在输入框输入模型
+    alert('请在模型列表中点击【+ 添加】至少选择一个模型，或直接在输入框中输入模型 ID！');
   });
 
   // 初始化加载

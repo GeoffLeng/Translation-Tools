@@ -31,6 +31,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const pdfTranslateEngine = document.getElementById('pdf-translate-engine');
   const pdfTranslateModel = document.getElementById('pdf-translate-model');
   const skipFormulasCheckbox = document.getElementById('skip-formulas');
+  const personaSelect = document.getElementById('persona-select');
+  const advPersonaSelect = document.getElementById('adv-persona-select');
+  const topBackBtn = document.getElementById('top-back-btn');
+  let currentPersona = 'biochem'; // 默认角色: 生化学术专家
   const translatePageBtn = document.getElementById('translate-page-btn');
   const translateDocBtn = document.getElementById('translate-doc-btn');
   const toggleBilingualBtn = document.getElementById('toggle-bilingual-btn');
@@ -2139,8 +2143,100 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 6.5 整页 JSON 结构化批量翻译 API (优先走扩展 background，本地独立模式走 server.js)
-  function requestBatchTranslation(items, engine, targetLang, model) {
+  // 6.4 提取相邻页边缘语境（前页末尾或后页开头约 180~250 字符，用于跨页断句与代词滑动窗口补齐）
+  async function getPageEdgeContext(pageNum, edge = 'bottom') {
+    if (!currentPdf || pageNum < 1 || pageNum > currentPdf.numPages) return '';
+    try {
+      const page = await currentPdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const rawItems = (textContent.items || [])
+        .filter(item => item.str && item.str.trim())
+        .map(item => normalizePdfText(item.str).trim())
+        .filter(s => s && !/^\d+$/.test(s) && !/^Page\s*\d+/i.test(s)); // 排除纯页码
+      
+      if (rawItems.length === 0) return '';
+
+      if (edge === 'bottom') {
+        const sliceItems = rawItems.slice(-15);
+        const joined = sliceItems.join(' ');
+        if (/^(Fig\.|Figure|Table|Ref\.|\[\d+\])/i.test(joined.trim())) {
+          return '';
+        }
+        return joined.slice(-250).trim();
+      } else {
+        const sliceItems = rawItems.slice(0, 15);
+        const joined = sliceItems.join(' ');
+        if (/^(Fig\.|Figure|Table)/i.test(joined.trim())) {
+          return '';
+        }
+        return joined.slice(0, 250).trim();
+      }
+    } catch (e) {
+      console.warn(`提取第 ${pageNum} 页边缘语境异常:`, e);
+      return '';
+    }
+  }
+
+  // 6.5 整页 JSON 结构化批量翻译 API (优先走本地多角色学术引擎与隐私脱敏，支持跨页语境 context 注入)
+  function requestBatchTranslation(items, engine, targetLang, model, context = null, persona = 'biochem') {
+    return new Promise((resolve, reject) => {
+      // 统一角色标识 (向后兼容 boolean 参数: true -> 'biochem', false -> 'general')
+      const activePersona = typeof persona === 'string' ? persona : (persona ? 'biochem' : 'general');
+
+      chrome.storage.local.get({
+        deepseekApiKey: '',
+        glmApiKey: '',
+        customModels: []
+      }, (settings) => {
+        let apiKey = settings.deepseekApiKey || settings.glmApiKey;
+        let endpoint = 'https://api.deepseek.com/chat/completions';
+        let modelName = 'deepseek-chat';
+
+        if (engine && engine.startsWith('custom_')) {
+          const customId = engine.substring(7);
+          const cm = settings.customModels.find(m => m.id === customId);
+          if (cm) {
+            apiKey = cm.apiKey;
+            endpoint = cm.endpoint;
+            modelName = cm.modelName;
+          }
+        }
+
+        fetch('http://localhost:3300/api/translate/bio', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items,
+            targetLang,
+            crossPageContext: context,
+            apiKey: apiKey || '',
+            endpoint,
+            model: modelName,
+            persona: activePersona,
+            enableHybrid: true
+          })
+        }).then(r => r.json()).then(res => {
+          if (res && res.success && Array.isArray(res.translations)) {
+            if (res.dispatchStats) {
+              console.log(`[${activePersona} 智能分流] ${res.dispatchStats.totalCount} 段落处理完毕: ${res.dispatchStats.freeCount} 段免Key直达，${res.dispatchStats.aiCount} 段大模型推理 (节约 Token: ${res.dispatchStats.savedTokenRatio})`);
+            }
+            if (res.matchedTerms && res.matchedTerms.length > 0) {
+              console.log(`[${activePersona} 术语增强] 命中 ${res.matchedTerms.length} 个权威专有词条:`, res.matchedTerms.slice(0, 5).map(t => `${t.term} -> ${t.translation}`).join('; '));
+            }
+            resolve(res.translations);
+            return;
+          }
+          // 本地接口异常时无缝回退到扩展 background
+          fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
+        }).catch(() => {
+          // 本地服务未开时平滑回退
+          fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
+        });
+      });
+    });
+  }
+
+  function fallbackChromeBatch(items, engine, targetLang, model, context, persona) {
     return new Promise((resolve, reject) => {
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({
@@ -2148,28 +2244,30 @@ document.addEventListener('DOMContentLoaded', () => {
           items: items,
           engine: engine,
           targetLang: targetLang,
-          model: model
+          model: model,
+          context: context,
+          persona: persona
         }, (response) => {
           if (chrome.runtime.lastError || !response || !response.success) {
-            fallbackLocalBatch(items, targetLang).then(resolve).catch(reject);
+            fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
           } else if (response.success && Array.isArray(response.translations)) {
             resolve(response.translations);
           } else {
-            fallbackLocalBatch(items, targetLang).then(resolve).catch(reject);
+            fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
           }
         });
       } else {
-        fallbackLocalBatch(items, targetLang).then(resolve).catch(reject);
+        fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
       }
     });
   }
 
-  async function fallbackLocalBatch(items, targetLang) {
+  async function fallbackLocalBatch(items, targetLang, context = null) {
     try {
       const res = await fetch('/api/translate-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items, targetLang })
+        body: JSON.stringify({ items, targetLang, context })
       });
       const data = await res.json();
       if (data && data.success && Array.isArray(data.translations)) {
@@ -2294,17 +2392,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页 (AI 翻译中...)`;
 
-    // 5. 方案 2 落地：整页结构化单次批量请求 (Batch Context Translation)
+    // 5. 跨页断句滑动窗口上下文注入与结构化批量请求 (Context-Aware Sliding Window)
     try {
+      let crossPageContext = null;
+      try {
+        const [prefixContext, suffixContext] = await Promise.all([
+          targetPageNum > 1 ? getPageEdgeContext(targetPageNum - 1, 'bottom') : Promise.resolve(''),
+          targetPageNum < currentPdf.numPages ? getPageEdgeContext(targetPageNum + 1, 'top') : Promise.resolve('')
+        ]);
+
+        if (prefixContext || suffixContext) {
+          crossPageContext = {
+            prefix: prefixContext,
+            suffix: suffixContext
+          };
+        }
+      } catch (ctxErr) {
+        console.warn('获取跨页上下文忽略:', ctxErr);
+      }
+
       const payload = tasksToTranslate.map(t => ({ id: t.block.id, text: t.textToTranslate }));
       let transResults;
       try {
-        transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel);
+        transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel, crossPageContext, currentPersona);
       } catch (firstErr) {
         console.warn(`第 ${targetPageNum} 页批量翻译遇阻，正在退避重试:`, firstErr.message);
         if (isBatch) showToast(`通道繁忙，第 ${targetPageNum} 页启动退避重试...`);
         await new Promise(r => setTimeout(r, 1200));
-        transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel);
+        transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel, crossPageContext, currentPersona);
       }
 
       if (activeTranslateController && activeTranslateController.aborted) return;
@@ -2567,7 +2682,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 顶栏沉浸式隐藏与一键浮动唤回 + 回到顶部
-  const topBackBtn = document.getElementById('top-back-btn');
   if (topBackBtn) {
     topBackBtn.addEventListener('click', () => {
       scrollToPage(1);
@@ -2611,6 +2725,36 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // 翻译专家角色体系管理与多处联动
+  function syncPersona(newVal) {
+    currentPersona = newVal || 'general';
+    if (personaSelect) personaSelect.value = currentPersona;
+    if (advPersonaSelect) advPersonaSelect.value = currentPersona;
+    chrome.storage.local.set({ translationPersona: currentPersona });
+
+    const personaLabels = {
+      general: '默认通用翻译 (大众通俗·流畅自然)',
+      biochem: '生化学术专家 (博士前沿·3,100+权威术语)',
+      economics: '经济学专家 (顶刊标准·量化与计量)'
+    };
+    showToast(`翻译角色已切换为: ${personaLabels[currentPersona] || currentPersona}`);
+  }
+
+  if (personaSelect) {
+    personaSelect.addEventListener('change', (e) => syncPersona(e.target.value));
+  }
+  if (advPersonaSelect) {
+    advPersonaSelect.addEventListener('change', (e) => syncPersona(e.target.value));
+  }
+
+  chrome.storage.local.get({ translationPersona: 'biochem' }, (res) => {
+    if (res.translationPersona) {
+      currentPersona = res.translationPersona;
+      if (personaSelect) personaSelect.value = currentPersona;
+      if (advPersonaSelect) advPersonaSelect.value = currentPersona;
+    }
+  });
 
   // 高级翻译设置模态框
   if (advancedTransBtn && advancedModal) {
@@ -2807,69 +2951,68 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 翻页控制栏事件绑定
-  if (prevPageBtn) {
-    prevPageBtn.addEventListener('click', () => {
-      if (currentPage > 1) scrollToPage(currentPage - 1);
-    });
-  }
+  // --- 智能图标功能解释小浮窗 (Smart Tooltips) ---
+  function initSmartTooltips() {
+    const tooltipEl = document.getElementById('pdf-smart-tooltip');
+    if (!tooltipEl) return;
 
-  if (nextPageBtn) {
-    nextPageBtn.addEventListener('click', () => {
-      if (currentPdf && currentPage < currentPdf.numPages) scrollToPage(currentPage + 1);
-    });
-  }
+    let currentTarget = null;
+    let hideTimeout = null;
 
-  if (pageNumInput) {
-    pageNumInput.addEventListener('change', () => {
-      const val = parseInt(pageNumInput.value, 10);
-      if (!isNaN(val)) scrollToPage(val);
+    document.addEventListener('mouseover', (e) => {
+      const target = e.target.closest('[data-tooltip-title]');
+      if (!target) return;
+      if (target === currentTarget) return;
+
+      currentTarget = target;
+      clearTimeout(hideTimeout);
+
+      const title = target.getAttribute('data-tooltip-title') || '';
+      const desc = target.getAttribute('data-tooltip-desc') || '';
+      const shortcut = target.getAttribute('data-tooltip-shortcut');
+
+      tooltipEl.innerHTML = `
+        <div class="tooltip-header">
+          <span class="tooltip-title">${title}</span>
+          ${shortcut ? `<span class="tooltip-shortcut">${shortcut}</span>` : ''}
+        </div>
+        <div class="tooltip-desc">${desc}</div>
+      `;
+
+      // 计算位置与智能视口避让
+      tooltipEl.classList.add('visible');
+      const rect = target.getBoundingClientRect();
+      const tooltipRect = tooltipEl.getBoundingClientRect();
+
+      let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+      let top = rect.bottom + 8; // 默认向下浮现
+
+      // 若下方贴底，自动向上反转弹出
+      if (top + tooltipRect.height > window.innerHeight - 10) {
+        top = Math.max(10, rect.top - tooltipRect.height - 8);
+      }
+
+      // 水平防溢出约束
+      if (left < 10) left = 10;
+      if (left + tooltipRect.width > window.innerWidth - 10) {
+        left = window.innerWidth - tooltipRect.width - 10;
+      }
+
+      tooltipEl.style.left = `${Math.round(left)}px`;
+      tooltipEl.style.top = `${Math.round(top)}px`;
     });
-    pageNumInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const val = parseInt(pageNumInput.value, 10);
-        if (!isNaN(val)) scrollToPage(val);
+
+    document.addEventListener('mouseout', (e) => {
+      const target = e.target.closest('[data-tooltip-title]');
+      if (!target) return;
+      if (target === currentTarget) {
+        currentTarget = null;
+        hideTimeout = setTimeout(() => {
+          tooltipEl.classList.remove('visible');
+        }, 120);
       }
     });
   }
 
-  // 缩放控制按钮事件绑定
-  if (zoomInBtn) {
-    zoomInBtn.addEventListener('click', () => {
-      changeZoom(currentScale + 0.15);
-    });
-  }
-
-  if (zoomOutBtn) {
-    zoomOutBtn.addEventListener('click', () => {
-      changeZoom(currentScale - 0.15);
-    });
-  }
-
-  // 键盘快捷键监听: Alt 透视、翻页 ← / →
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Alt' && viewerWorkspace && !isPeekingLocked) {
-      viewerWorkspace.classList.add('is-peeking');
-    }
-    // 非输入框焦点时支持键盘左右翻页
-    if (document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
-      if (e.key === 'ArrowLeft' && currentPage > 1) {
-        scrollToPage(currentPage - 1);
-      } else if (e.key === 'ArrowRight' && currentPdf && currentPage < currentPdf.numPages) {
-        scrollToPage(currentPage + 1);
-      }
-    }
-  });
-
-  window.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt' && viewerWorkspace && !isPeekingLocked) {
-      viewerWorkspace.classList.remove('is-peeking');
-    }
-  });
-
-  window.addEventListener('blur', () => {
-    if (viewerWorkspace && !isPeekingLocked) {
-      viewerWorkspace.classList.remove('is-peeking');
-    }
-  });
+  initSmartTooltips();
 });
