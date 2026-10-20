@@ -24,7 +24,7 @@ function isPdfUrl(rawUrl) {
 // 2. 动态更新 Declarative Net Request 拦截规则 (高效率毫秒级主框架零闪烁重定向)
 async function syncPdfDnrRules() {
   if (!chrome.declarativeNetRequest) return;
-  chrome.storage.local.get({ pdfAction: 'extension' }, async (settings) => {
+  chrome.storage.local.get({ pdfAction: 'native' }, async (settings) => {
     const shouldIntercept = (settings.pdfAction === 'extension');
     try {
       if (shouldIntercept) {
@@ -59,7 +59,7 @@ async function syncPdfDnrRules() {
   });
 }
 
-// 3. WebNavigation 顶级框架路由补充拦截 (捕获 arXiv/学术路由及本地 file:// 协议)
+// 3. WebNavigation 顶级框架路由补充拦截 (仅在用户显式开启 extension 接管时生效)
 if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
   chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     if (details.frameId !== 0) return; // 仅接管主窗口
@@ -67,7 +67,8 @@ if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
     const rawUrl = details.url;
     if (!isPdfUrl(rawUrl)) return;
 
-    chrome.storage.local.get({ pdfAction: 'extension' }, (settings) => {
+    chrome.storage.local.get({ pdfAction: 'native' }, (settings) => {
+      // 默认 'native' 模式下完全不拦截，保持 Chrome 原生正常打开
       if (settings.pdfAction !== 'extension') return;
 
       const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(rawUrl);
@@ -99,26 +100,41 @@ if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
 }
 
 // 初始化时创建上下文菜单及同步 DNR 规则
+function registerContextMenus() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'translateSelection',
+      title: '翻译选中内容',
+      contexts: ['selection']
+    });
+
+    chrome.contextMenus.create({
+      id: 'openPdfInExtension',
+      title: '在 Lite Translate 中打开此链接 PDF',
+      contexts: ['link']
+    });
+
+    chrome.contextMenus.create({
+      id: 'openCurrentPageInPdf',
+      title: '在 Lite Translate 阅读器中打开当前页面/PDF',
+      contexts: ['page', 'frame']
+    });
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'translateSelection',
-    title: '翻译选中内容',
-    contexts: ['selection']
+  // 兼容老版本：如果用户未曾主动修改过 pdfAction，重置为默认的 native 模式并清除 DNR 规则
+  chrome.storage.local.get(['pdfAction', 'pdfActionUserExplicit'], (res) => {
+    if (!res.pdfAction || (res.pdfAction === 'extension' && !res.pdfActionUserExplicit)) {
+      chrome.storage.local.set({ pdfAction: 'native' }, () => {
+        syncPdfDnrRules();
+      });
+    } else {
+      syncPdfDnrRules();
+    }
   });
 
-  chrome.contextMenus.create({
-    id: 'openPdfInExtension',
-    title: '在 Lite Translate 中打开此链接 PDF',
-    contexts: ['link']
-  });
-
-  chrome.contextMenus.create({
-    id: 'openCurrentPageInPdf',
-    title: '在 Lite Translate 阅读器中打开当前页面',
-    contexts: ['page']
-  });
-
-  syncPdfDnrRules();
+  registerContextMenus();
 });
 
 chrome.runtime.onStartup.addListener(() => {

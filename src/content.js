@@ -1003,7 +1003,7 @@
     if (href) {
       const cleanHref = href.split('?')[0].split('#')[0].toLowerCase();
       if (cleanHref.endsWith('.pdf') || href.toLowerCase().includes('/pdf/')) {
-        chrome.storage.local.get({ pdfAction: 'ask' }, (result) => {
+        chrome.storage.local.get({ pdfAction: 'native' }, (result) => {
           if (result.pdfAction === 'ask') {
             e.preventDefault();
             activePdfLink = href;
@@ -1014,6 +1014,7 @@
             const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(href);
             window.open(viewerUrl, '_blank');
           }
+          // 默认 'native' 模式：不拦截，完全由 Chrome 原生阅读器打开
         });
       }
     }

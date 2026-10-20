@@ -156,7 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
       deeplEndpoint: '',
       youdaoAppKey: '',
       youdaoAppSecret: '',
-      pdfAction: 'extension',
+      pdfAction: 'native',
       pdfContextMenu: true,
       customModels: []
     }, (settings) => {
@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (youdaoAppKey) youdaoAppKey.value = settings.youdaoAppKey || '';
       if (youdaoAppSecret) youdaoAppSecret.value = settings.youdaoAppSecret || '';
 
-      if (pdfAction) pdfAction.value = settings.pdfAction || 'extension';
+      if (pdfAction) pdfAction.value = settings.pdfAction || 'native';
       if (pdfContextMenu) pdfContextMenu.checked = settings.pdfContextMenu;
       customModels = settings.customModels || [];
 
@@ -410,8 +410,8 @@ document.addEventListener('DOMContentLoaded', () => {
       deeplApiKey: deeplApiKey ? deeplApiKey.value.trim() : '',
       deeplEndpoint: deeplEndpoint ? deeplEndpoint.value.trim() : '',
       youdaoAppKey: youdaoAppKey ? youdaoAppKey.value.trim() : '',
-      youdaoAppSecret: youdaoAppSecret ? youdaoAppSecret.value.trim() : '',
-      pdfAction: pdfAction ? pdfAction.value : 'ask',
+      pdfAction: pdfAction ? pdfAction.value : 'native',
+      pdfActionUserExplicit: true,
       pdfContextMenu: pdfContextMenu ? pdfContextMenu.checked : true
     });
   }

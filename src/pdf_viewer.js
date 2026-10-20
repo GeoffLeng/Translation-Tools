@@ -64,12 +64,50 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchToolBtn = document.getElementById('search-tool-btn');
   const textToolBtn = document.getElementById('text-tool-btn');
   const drawToolBtn = document.getElementById('draw-tool-btn');
+  const penSplitGroup = document.getElementById('pen-split-group');
+  const penArrowBtn = document.getElementById('pen-arrow-btn');
+  const penColorIndicator = document.getElementById('pen-color-indicator');
+  const highlighterSplitGroup = document.getElementById('highlighter-split-group');
+  const highlighterToolBtn = document.getElementById('highlighter-tool-btn');
+  const highlighterArrowBtn = document.getElementById('highlighter-arrow-btn');
+  const highlighterColorIndicator = document.getElementById('highlighter-color-indicator');
+  const eraserToolBtn = document.getElementById('eraser-tool-btn');
   const drawActionsGroup = document.getElementById('draw-actions-group');
   const drawUndoBtn = document.getElementById('draw-undo-btn');
   const drawClearBtn = document.getElementById('draw-clear-btn');
+  const inkPopover = document.getElementById('ink-popover');
+  const inkColorsGrid = document.getElementById('ink-colors-grid');
+  const inkPreviewCanvas = document.getElementById('ink-preview-canvas');
+  const inkWidthSlider = document.getElementById('ink-width-slider');
+  const inkWidthBadge = document.getElementById('ink-width-badge');
+
+  let currentTool = 'text'; // 'text' | 'pen' | 'highlighter' | 'eraser'
   let isTextMode = true; // 默认开启文本划词选择模式
-  let isDrawMode = false; // 画笔批注涂鸦模式
-  const pageDrawings = new Map(); // pageNum -> Array of { color, width, points }
+  let isDrawMode = false; // 批注模式标记 (包含 pen / highlighter / eraser)
+  let currentPenColor = '#0078D4'; // Edge 经典蓝
+  let currentPenWidth = 3;
+  let currentHighlighterColor = '#FFF176'; // Edge 经典荧光黄
+  let currentHighlighterWidth = 16;
+  let activePopoverTool = null; // 'pen' | 'highlighter' | null
+
+  // Edge 官方经典调色板 (30 色画笔矩阵 + 5 色荧光高亮)
+  const PEN_PALETTE = [
+    '#000000', '#424242', '#757575', '#9E9E9E', '#E0E0E0', '#FFFFFF',
+    '#AD1457', '#D32F2F', '#F57C00', '#FFA000', '#FBC02D', '#FFEB3B',
+    '#7CB342', '#388E3C', '#00796B', '#0097A7', '#0078D4', '#1A237E',
+    '#7B1FA2', '#4A148C', '#E0BB95', '#A1887F', '#6D4C41', '#3E2723',
+    '#F48FB1', '#FFCC80', '#FFF59D', '#A5D6A7', '#81D4FA', '#CE93D8'
+  ];
+
+  const HIGHLIGHTER_PALETTE = [
+    '#FFF176', // 荧光黄
+    '#69F0AE', // 荧光绿
+    '#40C4FF', // 荧光蓝
+    '#FF80AB', // 荧光粉
+    '#FF5252'  // 荧光红
+  ];
+
+  const pageDrawings = new Map(); // pageNum -> Array of { tool, color, baseWidth, opacity, points }
   let currentDocId = ''; // 当前文档唯一指纹标识，用于 IndexedDB 本地缓存持久化
   let searchMatchesList = [];
   let currentMatchIdx = -1;
@@ -1408,9 +1446,11 @@ document.addEventListener('DOMContentLoaded', () => {
     strokes.forEach(stroke => {
       if (!stroke.points || stroke.points.length === 0) return;
       ctx.beginPath();
-      ctx.strokeStyle = stroke.color || 'rgba(239, 68, 68, 0.88)';
-      ctx.lineWidth = (stroke.baseWidth || 3) * (currentScale || 1.0);
-      ctx.lineCap = 'round';
+      const isHighlighter = (stroke.tool === 'highlighter');
+      ctx.strokeStyle = stroke.color || (isHighlighter ? '#FFF176' : '#0078D4');
+      ctx.globalAlpha = isHighlighter ? (stroke.opacity || 0.45) : 1.0;
+      ctx.lineWidth = (stroke.baseWidth || (isHighlighter ? 16 : 3)) * (currentScale || 1.0);
+      ctx.lineCap = isHighlighter ? 'square' : 'round';
       ctx.lineJoin = 'round';
       const firstX = stroke.points[0].nx !== undefined ? stroke.points[0].nx * cw : stroke.points[0].x;
       const firstY = stroke.points[0].ny !== undefined ? stroke.points[0].ny * ch : stroke.points[0].y;
@@ -1425,12 +1465,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
       ctx.stroke();
+      ctx.globalAlpha = 1.0;
     });
+  }
+
+  // 点到线段距离平方计算 (几何碰撞检测)
+  function distToSegmentSquared(p, v, w) {
+    const l2 = (v.x - w.x) * (v.x - w.x) + (v.y - w.y) * (v.y - w.y);
+    if (l2 === 0) return (p.x - v.x) * (p.x - v.x) + (p.y - v.y) * (p.y - v.y);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = v.x + t * (w.x - v.x);
+    const projY = v.y + t * (w.y - v.y);
+    return (p.x - projX) * (p.x - projX) + (p.y - projY) * (p.y - projY);
+  }
+
+  // 判断触点是否碰撞命中笔画 (用于整笔橡皮擦)
+  function isPointHitStroke(pt, stroke, cw, ch) {
+    if (!stroke.points || stroke.points.length === 0) return false;
+    const strokeWidth = (stroke.baseWidth || 3) * (currentScale || 1.0);
+    const tolerance = Math.max(12, strokeWidth / 2 + 10);
+    const tol2 = tolerance * tolerance;
+
+    for (let i = 0; i < stroke.points.length - 1; i++) {
+      const p1 = { x: stroke.points[i].nx !== undefined ? stroke.points[i].nx * cw : stroke.points[i].x, y: stroke.points[i].ny !== undefined ? stroke.points[i].ny * ch : stroke.points[i].y };
+      const p2 = { x: stroke.points[i + 1].nx !== undefined ? stroke.points[i + 1].nx * cw : stroke.points[i + 1].x, y: stroke.points[i + 1].ny !== undefined ? stroke.points[i + 1].ny * ch : stroke.points[i + 1].y };
+      if (distToSegmentSquared(pt, p1, p2) <= tol2) {
+        return true;
+      }
+    }
+    if (stroke.points.length === 1) {
+      const p = { x: stroke.points[0].nx !== undefined ? stroke.points[0].nx * cw : stroke.points[0].x, y: stroke.points[0].ny !== undefined ? stroke.points[0].ny * ch : stroke.points[0].y };
+      const d2 = (pt.x - p.x) * (pt.x - p.x) + (pt.y - p.y) * (pt.y - p.y);
+      if (d2 <= tol2) return true;
+    }
+    return false;
   }
 
   function setupAnnotationDrawing(canvas, pageNum) {
     let drawing = false;
     let currentStroke = null;
+    let eraserModified = false;
     const ctx = canvas.getContext('2d');
 
     const toCanvasPoint = (e) => {
@@ -1440,44 +1515,103 @@ document.addEventListener('DOMContentLoaded', () => {
       return { x, y, nx: x / canvas.width, ny: y / canvas.height };
     };
 
+    // 橡皮擦碰撞擦除逻辑
+    const eraseAtPoint = (pt) => {
+      const strokes = pageDrawings.get(pageNum);
+      if (!strokes || strokes.length === 0) return;
+      let hitIdx = -1;
+      for (let i = strokes.length - 1; i >= 0; i--) {
+        if (isPointHitStroke(pt, strokes[i], canvas.width, canvas.height)) {
+          hitIdx = i;
+          break;
+        }
+      }
+      if (hitIdx !== -1) {
+        strokes.splice(hitIdx, 1);
+        eraserModified = true;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        redrawPageAnnotations(pageNum, canvas);
+      }
+    };
+
     canvas.addEventListener('pointerdown', (e) => {
       if (!isDrawMode || e.button !== 0) return;
       e.preventDefault();
       drawing = true;
-      // 捕获指针：划出页面边界也不会中断笔画，并支持触控/手写笔
-      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 旧内核不支持时忽略 */ }
+      eraserModified = false;
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 忽略旧环境 */ }
       const pt = toCanvasPoint(e);
+
+      if (currentTool === 'eraser') {
+        eraseAtPoint(pt);
+        return;
+      }
+
+      const isHighlighter = (currentTool === 'highlighter');
       currentStroke = {
-        color: '#EF4444',
-        baseWidth: 3,
+        tool: currentTool,
+        color: isHighlighter ? currentHighlighterColor : currentPenColor,
+        baseWidth: isHighlighter ? currentHighlighterWidth : currentPenWidth,
+        opacity: isHighlighter ? 0.45 : 1.0,
         points: [pt]
       };
+
       ctx.strokeStyle = currentStroke.color;
+      ctx.globalAlpha = currentStroke.opacity;
       ctx.lineWidth = currentStroke.baseWidth * (currentScale || 1.0);
-      ctx.lineCap = 'round';
+      ctx.lineCap = isHighlighter ? 'square' : 'round';
       ctx.lineJoin = 'round';
-      // 即时绘制微小位移点，确保单击也能形成圆点标记
+
       ctx.beginPath();
       ctx.moveTo(pt.x, pt.y);
       ctx.lineTo(pt.x + 0.2, pt.y);
       ctx.stroke();
+      ctx.globalAlpha = 1.0;
     });
 
     canvas.addEventListener('pointermove', (e) => {
-      if (!drawing || !isDrawMode || !currentStroke) return;
+      if (!drawing || !isDrawMode) return;
       const pt = toCanvasPoint(e);
+
+      if (currentTool === 'eraser') {
+        eraseAtPoint(pt);
+        return;
+      }
+
+      if (!currentStroke) return;
+      const isHighlighter = (currentStroke.tool === 'highlighter');
       const prev = currentStroke.points[currentStroke.points.length - 1];
       currentStroke.points.push(pt);
-      // 仅绘制新增线段，避免每次重描整条路径
+
+      ctx.strokeStyle = currentStroke.color;
+      ctx.globalAlpha = currentStroke.opacity;
+      ctx.lineWidth = currentStroke.baseWidth * (currentScale || 1.0);
+      ctx.lineCap = isHighlighter ? 'square' : 'round';
+      ctx.lineJoin = 'round';
+
       ctx.beginPath();
       ctx.moveTo(prev.x, prev.y);
       ctx.lineTo(pt.x, pt.y);
       ctx.stroke();
+      ctx.globalAlpha = 1.0;
     });
 
     const finishStroke = () => {
       if (!drawing) return;
       drawing = false;
+
+      if (currentTool === 'eraser') {
+        if (eraserModified && currentDocId) {
+          const strokes = pageDrawings.get(pageNum);
+          if (!strokes || strokes.length === 0) {
+            DocStorage.deleteDrawing(currentDocId, pageNum);
+          } else {
+            DocStorage.saveDrawing(currentDocId, pageNum, strokes);
+          }
+        }
+        return;
+      }
+
       if (currentStroke && currentStroke.points.length >= 1) {
         if (currentStroke.points.length === 1) {
           const pt = currentStroke.points[0];
@@ -2096,7 +2230,34 @@ document.addEventListener('DOMContentLoaded', () => {
   async function changeZoom(newScale) {
     if (!currentPdf) return;
     currentScale = Math.min(Math.max(newScale, 0.5), 3.0);
-    zoomValueSpan.textContent = `${Math.round(currentScale * 100)}%`;
+    const scalePercent = Math.round(currentScale * 100);
+    if (zoomValueSpan) {
+      zoomValueSpan.textContent = `${scalePercent}%`;
+    }
+
+    if (zoomPresetSelect) {
+      const matchVal = currentScale.toFixed(1);
+      const matchVal2 = currentScale.toFixed(2);
+      let found = false;
+      for (const opt of zoomPresetSelect.options) {
+        if (opt.value === matchVal || opt.value === matchVal2 || Math.round(parseFloat(opt.value) * 100) === scalePercent) {
+          zoomPresetSelect.value = opt.value;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        let customOpt = zoomPresetSelect.querySelector('option[data-custom="true"]');
+        if (!customOpt) {
+          customOpt = document.createElement('option');
+          customOpt.dataset.custom = 'true';
+          zoomPresetSelect.appendChild(customOpt);
+        }
+        customOpt.value = (Math.round(currentScale * 100) / 100).toString();
+        customOpt.textContent = `${scalePercent}%`;
+        zoomPresetSelect.value = customOpt.value;
+      }
+    }
 
     const lastPage = currentPage;
     const renderId = ++currentRenderId;
@@ -3142,6 +3303,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // 步长放大缩小按钮监听 (+ / -)
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener('click', () => {
+      const nextScale = Math.min(3.0, Math.round((currentScale + 0.1) * 10) / 10);
+      changeZoom(nextScale);
+    });
+  }
+
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener('click', () => {
+      const nextScale = Math.max(0.5, Math.round((currentScale - 0.1) * 10) / 10);
+      changeZoom(nextScale);
+    });
+  }
+
+  // Ctrl + 滚轮缩放支持
+  if (viewerMain) {
+    viewerMain.addEventListener('wheel', (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.1 : -0.1;
+        const nextScale = Math.min(3.0, Math.max(0.5, Math.round((currentScale + delta) * 10) / 10));
+        changeZoom(nextScale);
+      }
+    }, { passive: false });
+  }
+
   // 顶栏沉浸式隐藏与一键浮动唤回 + 回到顶部
   if (topBackBtn) {
     topBackBtn.addEventListener('click', () => {
@@ -3259,30 +3447,223 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- 模式切换：文本选择模式 vs 画笔批注模式 (互斥切换与高亮状态指示) ---
+  // --- 模式切换与墨迹调色系统 (Edge 风格：文本、画笔、高光、橡皮擦) ---
+
+  // 动态绘制正弦波墨迹预览曲线
+  function updateInkWavePreview(color, width, isHighlighter) {
+    if (!inkPreviewCanvas) return;
+    const ctx = inkPreviewCanvas.getContext('2d');
+    const w = inkPreviewCanvas.width;
+    const h = inkPreviewCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.min(width, 24);
+    ctx.lineCap = isHighlighter ? 'square' : 'round';
+    ctx.lineJoin = 'round';
+    ctx.globalAlpha = isHighlighter ? 0.45 : 1.0;
+
+    const centerY = h / 2;
+    const amplitude = 7;
+    const startX = 14;
+    const endX = w - 14;
+
+    ctx.moveTo(startX, centerY);
+    for (let x = startX; x <= endX; x++) {
+      const norm = (x - startX) / (endX - startX);
+      const y = centerY + Math.sin(norm * Math.PI * 2) * amplitude;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1.0;
+  }
+
+  // 渲染调色板矩阵 (30 色画笔 vs 5 色荧光笔)
+  function renderInkPalette(tool) {
+    if (!inkColorsGrid) return;
+    inkColorsGrid.innerHTML = '';
+    const isHighlighter = (tool === 'highlighter');
+    const palette = isHighlighter ? HIGHLIGHTER_PALETTE : PEN_PALETTE;
+    const currentColor = isHighlighter ? currentHighlighterColor : currentPenColor;
+
+    if (isHighlighter) {
+      inkColorsGrid.classList.add('highlighter-mode');
+    } else {
+      inkColorsGrid.classList.remove('highlighter-mode');
+    }
+
+    palette.forEach(color => {
+      const btn = document.createElement('button');
+      btn.className = 'ink-color-btn';
+      btn.style.backgroundColor = color;
+      btn.title = color;
+      if (color.toUpperCase() === currentColor.toUpperCase()) {
+        btn.classList.add('selected');
+      }
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        inkColorsGrid.querySelectorAll('.ink-color-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+
+        if (isHighlighter) {
+          currentHighlighterColor = color;
+          if (highlighterColorIndicator) highlighterColorIndicator.style.backgroundColor = color;
+          updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true);
+        } else {
+          currentPenColor = color;
+          if (penColorIndicator) penColorIndicator.style.backgroundColor = color;
+          updateInkWavePreview(currentPenColor, currentPenWidth, false);
+        }
+
+        chrome.storage.local.set({
+          inkPenColor: currentPenColor,
+          inkPenWidth: currentPenWidth,
+          inkHighlighterColor: currentHighlighterColor,
+          inkHighlighterWidth: currentHighlighterWidth
+        });
+      });
+
+      inkColorsGrid.appendChild(btn);
+    });
+
+    // 初始化粗细滑块与波浪线
+    if (inkWidthSlider && inkWidthBadge) {
+      if (isHighlighter) {
+        inkWidthSlider.min = '8';
+        inkWidthSlider.max = '36';
+        inkWidthSlider.value = currentHighlighterWidth.toString();
+        inkWidthBadge.textContent = `${currentHighlighterWidth}px`;
+        updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true);
+      } else {
+        inkWidthSlider.min = '1';
+        inkWidthSlider.max = '24';
+        inkWidthSlider.value = currentPenWidth.toString();
+        inkWidthBadge.textContent = `${currentPenWidth}px`;
+        updateInkWavePreview(currentPenColor, currentPenWidth, false);
+      }
+    }
+  }
+
+  function openInkPopover(tool, triggerEl) {
+    if (!inkPopover || !triggerEl) return;
+    if (activePopoverTool === tool && !inkPopover.classList.contains('hidden')) {
+      closeInkPopover();
+      return;
+    }
+
+    activePopoverTool = tool;
+    renderInkPalette(tool);
+
+    const rect = triggerEl.getBoundingClientRect();
+    inkPopover.style.top = `${rect.bottom + 6}px`;
+    let left = rect.left + rect.width / 2 - 128;
+    left = Math.max(10, Math.min(window.innerWidth - 270, left));
+    inkPopover.style.left = `${left}px`;
+
+    inkPopover.classList.remove('hidden');
+  }
+
+  function closeInkPopover() {
+    if (inkPopover) {
+      inkPopover.classList.add('hidden');
+      activePopoverTool = null;
+    }
+  }
+
+  // 绑定粗细滑块输入
+  if (inkWidthSlider) {
+    inkWidthSlider.addEventListener('input', () => {
+      const val = parseInt(inkWidthSlider.value, 10) || 3;
+      if (inkWidthBadge) inkWidthBadge.textContent = `${val}px`;
+      if (activePopoverTool === 'highlighter') {
+        currentHighlighterWidth = val;
+        updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true);
+      } else {
+        currentPenWidth = val;
+        updateInkWavePreview(currentPenColor, currentPenWidth, false);
+      }
+      chrome.storage.local.set({
+        inkPenWidth: currentPenWidth,
+        inkHighlighterWidth: currentHighlighterWidth
+      });
+    });
+  }
+
+  // 点击外部自动收起浮层
+  document.addEventListener('click', (e) => {
+    if (inkPopover && !inkPopover.classList.contains('hidden')) {
+      if (!inkPopover.contains(e.target) && 
+          !e.target.closest('#pen-split-group') && 
+          !e.target.closest('#highlighter-split-group')) {
+        closeInkPopover();
+      }
+    }
+  });
+
+  // 读取已保存的墨迹属性偏好
+  chrome.storage.local.get({
+    inkPenColor: '#0078D4',
+    inkPenWidth: 3,
+    inkHighlighterColor: '#FFF176',
+    inkHighlighterWidth: 16
+  }, (res) => {
+    currentPenColor = res.inkPenColor || '#0078D4';
+    currentPenWidth = res.inkPenWidth || 3;
+    currentHighlighterColor = res.inkHighlighterColor || '#FFF176';
+    currentHighlighterWidth = res.inkHighlighterWidth || 16;
+    if (penColorIndicator) penColorIndicator.style.backgroundColor = currentPenColor;
+    if (highlighterColorIndicator) highlighterColorIndicator.style.backgroundColor = currentHighlighterColor;
+  });
+
+  // 全局统一工具模式切换
+  function setToolMode(tool, silent) {
+    currentTool = tool;
+    isTextMode = (tool === 'text');
+    isDrawMode = (tool !== 'text');
+
+    // 工具按钮高亮状态联动
+    if (textToolBtn) textToolBtn.classList.toggle('active', tool === 'text');
+    if (penSplitGroup) penSplitGroup.classList.toggle('active', tool === 'pen');
+    if (highlighterSplitGroup) highlighterSplitGroup.classList.toggle('active', tool === 'highlighter');
+    if (eraserToolBtn) eraserToolBtn.classList.toggle('active', tool === 'eraser');
+
+    // 辅助按钮组 (撤销/清空)
+    if (drawActionsGroup) {
+      drawActionsGroup.classList.toggle('hidden', tool === 'text');
+    }
+
+    // 画布与文本层交互状态
+    if (viewerWorkspace) {
+      viewerWorkspace.classList.toggle('mode-draw', tool === 'pen' || tool === 'highlighter');
+      viewerWorkspace.classList.toggle('mode-eraser', tool === 'eraser');
+    }
+
+    if (tool !== 'text') {
+      const sel = window.getSelection();
+      if (sel) sel.removeAllRanges();
+      hideIcon();
+      hidePanel();
+    }
+
+    if (!silent) {
+      const toolTips = {
+        text: '已进入文本选择模式：滑选段落即显翻译气泡',
+        pen: '已进入画笔绘制模式：支持 30 色彩绘与微调',
+        highlighter: '已进入高光荧光笔：半透明高亮，不遮挡文字',
+        eraser: '已进入橡皮擦：点击或划过即可整笔擦除'
+      };
+      if (toolTips[tool]) showToast(toolTips[tool]);
+    }
+  }
+
   function setTextMode(silent) {
-    const changed = !isTextMode || isDrawMode;
-    isTextMode = true;
-    isDrawMode = false;
-    if (textToolBtn) textToolBtn.classList.add('active');
-    if (drawToolBtn) drawToolBtn.classList.remove('active');
-    if (drawActionsGroup) drawActionsGroup.classList.add('hidden');
-    if (viewerWorkspace) viewerWorkspace.classList.remove('mode-draw');
-    if (changed && !silent) showToast('已进入文本选择模式：滑选段落即显翻译气泡');
+    setToolMode('text', silent);
   }
 
   function setDrawMode() {
-    isDrawMode = true;
-    isTextMode = false;
-    if (drawToolBtn) drawToolBtn.classList.add('active');
-    if (textToolBtn) textToolBtn.classList.remove('active');
-    if (drawActionsGroup) drawActionsGroup.classList.remove('hidden');
-    if (viewerWorkspace) viewerWorkspace.classList.add('mode-draw');
-    const sel = window.getSelection();
-    if (sel) sel.removeAllRanges();
-    hideIcon();
-    hidePanel();
-    showToast('已进入画笔批注模式：按住左键手绘，支持撤销/清空');
+    setToolMode('pen', false);
   }
 
   function refreshPageAnnotationCanvas(pageNum) {
@@ -3324,17 +3705,54 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast(`已清空第 ${currentPage} 页手绘批注`);
   }
 
+  // 挂载按钮交互监听
   if (textToolBtn) {
-    textToolBtn.addEventListener('click', () => setTextMode(false));
+    textToolBtn.addEventListener('click', () => {
+      closeInkPopover();
+      setToolMode('text', false);
+    });
   }
 
   if (drawToolBtn) {
     drawToolBtn.addEventListener('click', () => {
-      if (isDrawMode) {
-        setTextMode(false);
+      if (currentTool === 'pen') {
+        openInkPopover('pen', penSplitGroup || drawToolBtn);
       } else {
-        setDrawMode();
+        setToolMode('pen', false);
       }
+    });
+  }
+
+  if (penArrowBtn) {
+    penArrowBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setToolMode('pen', true);
+      openInkPopover('pen', penSplitGroup || penArrowBtn);
+    });
+  }
+
+  if (highlighterToolBtn) {
+    highlighterToolBtn.addEventListener('click', () => {
+      if (currentTool === 'highlighter') {
+        openInkPopover('highlighter', highlighterSplitGroup || highlighterToolBtn);
+      } else {
+        setToolMode('highlighter', false);
+      }
+    });
+  }
+
+  if (highlighterArrowBtn) {
+    highlighterArrowBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setToolMode('highlighter', true);
+      openInkPopover('highlighter', highlighterSplitGroup || highlighterArrowBtn);
+    });
+  }
+
+  if (eraserToolBtn) {
+    eraserToolBtn.addEventListener('click', () => {
+      closeInkPopover();
+      setToolMode('eraser', false);
     });
   }
 
@@ -3346,7 +3764,7 @@ document.addEventListener('DOMContentLoaded', () => {
     drawClearBtn.addEventListener('click', clearCurrentPageAnnotations);
   }
 
-  // 画笔模式下支持全局 Ctrl+Z 撤销最后一笔
+  // 画笔/批注模式下全局 Ctrl+Z 撤销最后一笔
   window.addEventListener('keydown', (e) => {
     if (isDrawMode && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
       e.preventDefault();

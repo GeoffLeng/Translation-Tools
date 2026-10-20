@@ -87,12 +87,40 @@
           <span>Text</span>
         </button>
 
-        <button id="draw-tool-btn" class="sub-tool-btn with-text" data-tooltip-title="画笔批注工具" data-tooltip-desc="在当前 PDF 页面上进行手绘标记、重点圈画与下划线标注">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path></svg>
-          <span>Draw</span>
-        </button>
+        <!-- 批注工具组：普通画笔 (Draw)、荧光笔 (Highlighter)、橡皮擦 (Eraser) -->
+        <div class="ink-tools-cluster" id="ink-tools-cluster">
+          <!-- 1. 普通画笔 (带颜色指示与下拉属性微调) -->
+          <div class="ink-split-btn-group" id="pen-split-group">
+            <button id="draw-tool-btn" class="sub-tool-btn ink-main-btn" data-tooltip-title="画笔 (绘制)" data-tooltip-desc="手绘标记、重点圈画，支持 30 种色彩与粗细调节">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path></svg>
+              <span>绘制</span>
+              <span class="ink-color-indicator" id="pen-color-indicator" style="background-color: #0078D4;"></span>
+            </button>
+            <button id="pen-arrow-btn" class="ink-arrow-btn" title="选择画笔墨迹属性 (颜色与粗细)">
+              <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+          </div>
 
-        <!-- 批注辅助工具组 (仅在画笔模式下显示：撤销最后一笔与清空本页) -->
+          <!-- 2. 荧光笔 (高光半透明强调) -->
+          <div class="ink-split-btn-group" id="highlighter-split-group">
+            <button id="highlighter-tool-btn" class="sub-tool-btn ink-main-btn" data-tooltip-title="高光荧光笔" data-tooltip-desc="半透明荧光高亮强调，突出重点且不遮挡文字">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11-6 6v3h3l6-6m-3-3 7-7 3 3-7 7m-3-3 3 3"></path><line x1="18" y1="2" x2="22" y2="6"></line></svg>
+              <span>高光</span>
+              <span class="ink-color-indicator" id="highlighter-color-indicator" style="background-color: #FFF176;"></span>
+            </button>
+            <button id="highlighter-arrow-btn" class="ink-arrow-btn" title="选择高光墨迹属性 (颜色与粗细)">
+              <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+          </div>
+
+          <!-- 3. 橡皮擦 (整笔笔画擦除) -->
+          <button id="eraser-tool-btn" class="sub-tool-btn with-text" data-tooltip-title="橡皮擦" data-tooltip-desc="点击或滑过笔画即可整笔擦除">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>
+            <span>擦除</span>
+          </button>
+        </div>
+
+        <!-- 批注辅助工具组 (仅在画笔/高光模式下显示：撤销最后一笔与清空本页) -->
         <div id="draw-actions-group" class="draw-actions-group hidden">
           <button id="draw-undo-btn" class="sub-tool-btn with-text compact-btn" data-tooltip-title="撤销批注" data-tooltip-desc="撤销当前页最后一笔手绘涂鸦" data-tooltip-shortcut="Ctrl+Z">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
@@ -457,6 +485,34 @@
 
   <!-- 简洁智能功能解释小浮窗 (智能避让边界·高质感毛玻璃) -->
   <div id="pdf-smart-tooltip" class="pdf-smart-tooltip"></div>
+
+  <!-- Edge 风格墨迹属性调节面板 (Ink Properties Popover) -->
+  <div id="ink-popover" class="ink-popover hidden">
+    <div class="ink-popover-header">
+      <span class="ink-popover-title" id="ink-popover-title">颜色</span>
+    </div>
+
+    <!-- 动态色彩阵列 -->
+    <div id="ink-colors-grid" class="ink-colors-grid"></div>
+
+    <!-- 实时墨迹预览曲线 -->
+    <div class="ink-preview-container">
+      <canvas id="ink-preview-canvas" width="220" height="38"></canvas>
+    </div>
+
+    <!-- 粗细控制区 -->
+    <div class="ink-width-section">
+      <div class="ink-width-header">
+        <span class="ink-popover-title">粗细</span>
+        <span class="ink-width-badge" id="ink-width-badge">3px</span>
+      </div>
+      <div class="ink-slider-row">
+        <span class="ink-slider-label">细</span>
+        <input type="range" id="ink-width-slider" min="1" max="24" value="3" class="ink-range-slider">
+        <span class="ink-slider-label">粗</span>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/src/pdf_viewer.js"></script>
 </body>

@@ -164,17 +164,17 @@
 
       <!-- PDF Settings Tab -->
       <section id="pdf-settings-tab" class="tab-pane">
-        <h1 class="page-title">PDF 阅读器与自动接管设置</h1>
+        <h1 class="page-title">PDF 阅读与打开偏好设置</h1>
         <div class="ios-card">
           <div class="setting-item">
             <div class="setting-info">
-              <span class="setting-title">自动接管浏览器打开的 PDF 链接</span>
-              <span class="setting-desc">访问网络 PDF 链接时，自动重定向至内置双语阅读器 (沙拉查词/沉浸式翻译同款)</span>
+              <span class="setting-title">PDF 文档打开偏好</span>
+              <span class="setting-desc">配置在 Chrome 中打开 PDF 时的默认行为。默认保持 Chrome 原生打开，需要翻译时通过右键或工具栏一键进入扩展阅读器</span>
             </div>
             <select id="pdf-action" class="ios-select">
-              <option value="extension">自动接管并打开双语阅读器 (推荐)</option>
-              <option value="ask">在工具栏弹出提示询问</option>
-              <option value="native">不接管，保持 Chrome 原生阅读器</option>
+              <option value="native" selected>保持 Chrome 原生打开 (推荐·按需自主开启翻译)</option>
+              <option value="ask">点击网页 PDF 链接时弹出提示询问</option>
+              <option value="extension">自动接管所有 PDF 并直接用扩展阅读器打开</option>
             </select>
           </div>
           <div class="setting-item">

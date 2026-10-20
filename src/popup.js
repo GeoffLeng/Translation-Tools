@@ -60,14 +60,56 @@ document.addEventListener('DOMContentLoaded', () => {
                     url.toLowerCase().includes('/pdf/');
       
       if (isPdf) {
-        document.getElementById('pdf-warning-card').classList.remove('hidden');
-        document.getElementById('workspace-main').classList.add('hidden');
+        const warningCard = document.getElementById('pdf-warning-card');
+        const workspaceMain = document.getElementById('workspace-main');
+        const openPdfBtn = document.getElementById('open-pdf-btn');
+        const openPdfNewTabBtn = document.getElementById('open-pdf-newtab-btn');
+        const dismissBtn = document.getElementById('dismiss-pdf-card-btn');
+        const filePermHint = document.getElementById('file-perm-hint');
+        const openExtManageBtn = document.getElementById('open-ext-manage-btn');
 
-        document.getElementById('open-pdf-btn').onclick = () => {
-          const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(url);
-          chrome.tabs.update(tab.id, { url: viewerUrl });
-          window.close();
-        };
+        if (warningCard) warningCard.classList.remove('hidden');
+        if (workspaceMain) workspaceMain.classList.add('hidden');
+
+        // 当前页打开
+        if (openPdfBtn) {
+          openPdfBtn.onclick = () => {
+            const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(url);
+            chrome.tabs.update(tab.id, { url: viewerUrl });
+            window.close();
+          };
+        }
+
+        // 新标签页打开
+        if (openPdfNewTabBtn) {
+          openPdfNewTabBtn.onclick = () => {
+            const viewerUrl = chrome.runtime.getURL('pdf_viewer.html') + '?file=' + encodeURIComponent(url);
+            chrome.tabs.create({ url: viewerUrl });
+            window.close();
+          };
+        }
+
+        // 切换回文本查词
+        if (dismissBtn) {
+          dismissBtn.onclick = () => {
+            if (warningCard) warningCard.classList.add('hidden');
+            if (workspaceMain) workspaceMain.classList.remove('hidden');
+          };
+        }
+
+        // 本地 file:// 协议权限感知
+        if (url.startsWith('file://') && chrome.extension && chrome.extension.isAllowedFileSchemeAccess) {
+          chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+            if (!isAllowed && filePermHint) {
+              filePermHint.classList.remove('hidden');
+              if (openExtManageBtn) {
+                openExtManageBtn.onclick = () => {
+                  chrome.tabs.create({ url: 'chrome://extensions/?id=' + chrome.runtime.id });
+                };
+              }
+            }
+          });
+        }
       }
     }
   });

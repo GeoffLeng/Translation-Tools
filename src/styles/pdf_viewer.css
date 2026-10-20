@@ -294,18 +294,245 @@ body {
   display: none !important;
 }
 
-.sub-tool-btn.compact-btn {
-  padding: 2px 6px;
-  font-size: 11px;
-  height: 24px;
-  border-radius: 4px;
-  background: #ffffff;
+/* Edge 风格批注工具套件 (画笔、高光、橡皮擦) */
+.ink-tools-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.sub-tool-btn.compact-btn:hover {
-  background: #fee2e2;
-  color: #dc2626;
-  border-color: #fca5a5;
+.ink-split-btn-group {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  transition: all 0.15s ease;
+}
+
+.ink-split-btn-group:hover {
+  background: #e5e7eb;
+}
+
+.ink-split-btn-group.active {
+  background: #2563EB !important;
+  border-color: #1D4ED8 !important;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+.ink-split-btn-group.active .ink-main-btn,
+.ink-split-btn-group.active .ink-arrow-btn {
+  color: #ffffff !important;
+}
+
+.ink-split-btn-group.active svg {
+  stroke: #ffffff !important;
+}
+
+.ink-main-btn {
+  height: 26px;
+  padding: 0 4px 0 8px;
+  border: none;
+  background: transparent;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.ink-arrow-btn {
+  height: 26px;
+  width: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 0 4px 4px 0;
+  transition: background-color 0.12s;
+}
+
+.ink-arrow-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.ink-split-btn-group.active .ink-arrow-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 笔刷颜色小圆点指示器 */
+.ink-color-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  margin-left: 2px;
+}
+
+/* Edge 风格墨迹属性调节面板 */
+.ink-popover {
+  position: fixed;
+  z-index: 10001;
+  width: 256px;
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  animation: inkFadeIn 0.15s ease-out;
+}
+
+@keyframes inkFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ink-popover.hidden {
+  display: none !important;
+}
+
+.ink-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.ink-popover-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.ink-colors-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 9px 7px;
+  margin-bottom: 12px;
+  justify-items: center;
+  align-items: center;
+}
+
+.ink-colors-grid.highlighter-mode {
+  display: flex;
+  justify-content: space-around;
+  padding: 0 4px;
+}
+
+.ink-color-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+  transition: transform 0.12s, box-shadow 0.12s;
+  box-sizing: border-box;
+}
+
+.ink-colors-grid.highlighter-mode .ink-color-btn {
+  width: 32px;
+  height: 32px;
+}
+
+.ink-color-btn:hover {
+  transform: scale(1.15);
+}
+
+.ink-color-btn.selected {
+  outline: none;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0078D4 !important;
+  transform: scale(1.08);
+}
+
+.ink-preview-container {
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  padding: 2px 4px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.ink-preview-container canvas {
+  display: block;
+}
+
+.ink-width-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ink-width-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ink-width-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0078D4;
+  background: #e0f2fe;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.ink-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ink-slider-label {
+  font-size: 11.5px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.ink-range-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: #e2e8f0;
+  outline: none;
+  cursor: pointer;
+}
+
+.ink-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2563EB;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.ink-range-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* 橡皮擦光标 */
+.viewer-workspace.mode-eraser .annotation-canvas {
+  pointer-events: auto !important;
+  cursor: crosshair !important;
+  touch-action: none;
 }
 
 /* 翻页胶囊组件: < 2 / 118 > */
