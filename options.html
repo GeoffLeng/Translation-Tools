@@ -17,6 +17,7 @@
         <a href="#general" class="menu-item active" data-tab="general">通用设置</a>
         <a href="#engines" class="menu-item" data-tab="engines">翻译引擎</a>
         <a href="#pdf-settings" class="menu-item" data-tab="pdf-settings">PDF 阅读器</a>
+        <a href="#storage" class="menu-item" data-tab="storage">存储空间管理</a>
         <a href="#about" class="menu-item" data-tab="about">关于</a>
       </nav>
     </aside>
@@ -193,12 +194,97 @@
             </div>
             <button type="button" id="open-extension-manage-btn" class="ios-button secondary-btn" style="padding: 6px 14px; font-size: 12.5px;">管理扩展权限</button>
           </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">PDF 本地缓存空间管理</span>
+              <span class="setting-desc">查看已缓存文献总数与磁盘占用，支持一键清空 30 天前旧缓存</span>
+            </div>
+            <button type="button" id="jump-to-storage-btn" class="ios-button secondary-btn" style="padding: 6px 14px; font-size: 12.5px;">管理存储空间</button>
+          </div>
           <div class="setting-item" style="border-bottom: none;">
             <div class="setting-info">
               <span class="setting-title">独立沉浸式 PDF 阅读器</span>
               <span class="setting-desc">随时在新标签页中启动本地 PDF 翻译页面</span>
             </div>
             <button type="button" id="open-standalone-viewer-btn" class="ios-button primary-btn" style="padding: 6px 14px; font-size: 12.5px;">打开阅读器</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Storage Tab (IndexedDB 存储空间管理与长效维护) -->
+      <section id="storage-tab" class="tab-pane">
+        <h1 class="page-title">存储空间管理</h1>
+        
+        <!-- 存储占用指标仪表盘 (Storage Metrics Dashboard) -->
+        <div class="storage-metrics-grid">
+          <div class="storage-metric-card">
+            <span class="metric-label">已缓存文献</span>
+            <div class="metric-value-row">
+              <span id="storage-doc-count" class="metric-value">0</span>
+              <span class="metric-unit">篇</span>
+            </div>
+            <span class="metric-sub">本地 IndexedDB 秒级断点续读</span>
+          </div>
+          <div class="storage-metric-card">
+            <span class="metric-label">缓存页面总量</span>
+            <div class="metric-value-row">
+              <span id="storage-page-count" class="metric-value">0</span>
+              <span class="metric-unit">页</span>
+            </div>
+            <span id="storage-page-detail" class="metric-sub">0 页译文 · 0 页批注</span>
+          </div>
+          <div class="storage-metric-card">
+            <span class="metric-label">估计占用磁盘空间</span>
+            <div class="metric-value-row">
+              <span id="storage-disk-usage" class="metric-value">0 B</span>
+            </div>
+            <span class="metric-sub">不占用 Chrome LocalStorage 额度</span>
+          </div>
+        </div>
+
+        <div class="ios-card" style="margin-top: 16px;">
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">清空 30 天前文献缓存</span>
+              <span class="setting-desc">自动扫描并清理 30 天未再阅读的旧文献批注与译文，保留近期活跃文献，释放本地磁盘</span>
+            </div>
+            <button type="button" id="clean-30-days-btn" class="ios-button secondary-btn" style="padding: 7px 16px; font-size: 13px;">清空 30 天前缓存</button>
+          </div>
+          <div class="setting-item">
+            <div class="setting-info">
+              <span class="setting-title">清空全部本地文献缓存</span>
+              <span class="setting-desc" style="color: #ff3b30;">彻底清空所有保存在 IndexedDB 中的翻译和批注记录（不可逆，原 PDF 文件不受任何影响）</span>
+            </div>
+            <button type="button" id="clear-all-storage-btn" class="ios-button danger-btn" style="padding: 7px 16px; font-size: 13px;">清空所有缓存</button>
+          </div>
+          <div class="setting-item" style="border-bottom: none;">
+            <div class="setting-info">
+              <span class="setting-title">刷新存储统计</span>
+              <span class="setting-desc">重新扫描 IndexedDB 数据库并重新计算磁盘占用</span>
+            </div>
+            <button type="button" id="refresh-storage-btn" class="ios-button secondary-btn" style="padding: 7px 16px; font-size: 13px;">刷新统计</button>
+          </div>
+        </div>
+
+        <!-- 缓存文献清单明细 (Cached Documents List) -->
+        <h2 class="section-subtitle" style="margin-top: 24px;">已缓存文献清单明细</h2>
+        <div class="ios-card" style="padding: 0; overflow: hidden;">
+          <div id="storage-docs-empty" class="storage-empty-state">
+            <span>暂无任何本地缓存的文献记录</span>
+          </div>
+          <div id="storage-docs-table-wrapper" class="storage-table-wrapper hidden">
+            <table class="storage-docs-table">
+              <thead>
+                <tr>
+                  <th style="width: 38%;">文献名称</th>
+                  <th style="width: 14%;">总页数</th>
+                  <th style="width: 24%;">缓存内容</th>
+                  <th style="width: 16%;">最后更新</th>
+                  <th style="width: 8%; text-align: center;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="storage-docs-tbody"></tbody>
+            </table>
           </div>
         </div>
       </section>

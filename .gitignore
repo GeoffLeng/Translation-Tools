@@ -3,6 +3,7 @@ node_modules/
 
 # Production build output (generated via `npm run build`)
 dist/
+release/
 
 # Logs
 *.log

@@ -1,8 +1,8 @@
 // 多角色前沿学术文献高精度翻译路由逻辑 (Multi-Persona Translation Pipeline with Privacy Sanitization)
-import { maskBioEntities, unmaskBioEntities } from '../engine/entity_masker.js';
+import { maskBioEntities, unmaskBioEntities, maskNumericEntities, unmaskNumericEntities } from '../engine/entity_masker.js';
 import { matchTerms, loadAllTerms } from '../engine/term_matcher.js';
 import { buildBioSystemPrompt, buildBioBatchPrompt } from '../engine/prompt_builder.js';
-import { translateFreeFast } from '../engine/free_engines.js';
+import { translateFreeFast, runThrottled } from '../engine/free_engines.js';
 import { evaluateChunkUncertainty } from '../engine/uncertainty_evaluator.js';
 import { sanitizeTextForUpload, restoreSanitizedData, auditTextSafety } from '../engine/privacy_filter.js';
 
@@ -40,10 +40,10 @@ export async function handleBioTranslate(payload) {
       const { sanitizedText, redactionMap } = sanitizeTextForUpload(item.text);
       redactionMaps.set(item.id, redactionMap);
 
-      // 1.2 专业实体遮罩 (通用大众角色时不进行专业硬遮罩)
+      // 1.2 专业实体与数值硬遮罩 (所有角色均执行高危数值硬遮罩，避免大模型幻觉)
       const { maskedText, tokenMap } = (persona !== 'general')
         ? maskBioEntities(sanitizedText)
-        : { maskedText: sanitizedText, tokenMap: new Map() };
+        : maskNumericEntities(sanitizedText);
       tokenMaps.set(item.id, tokenMap);
 
       // 1.3 检索当前角色专用词典
@@ -63,22 +63,25 @@ export async function handleBioTranslate(payload) {
       }
     }
 
-    // A. 确定性段落：并发调用免费 Google / Bing 极速通道 (0 Token 消耗)
-    const freePromises = deterministicItems.map(async (dItem) => {
+    // A. 确定性段落：通过节流并发通道平滑请求免费引擎，彻底规避 429 请求风暴
+    let rateLimitEncountered = false;
+    const freeResultsRaw = await runThrottled(deterministicItems, async (dItem) => {
       try {
         let trans = await translateFreeFast(dItem.text, targetLang);
-        // 还原隐私数据
         const rMap = redactionMaps.get(dItem.id);
         trans = restoreSanitizedData(trans, rMap);
         return { id: dItem.id, text: trans, source: 'free_engine' };
       } catch (err) {
-        console.warn(`[Hybrid] 段落 ID:${dItem.id} 免Key机翻失败，自动降级并入AI重译:`, err.message);
+        if (err.message && (err.message.includes('429') || err.message.includes('受限'))) {
+          rateLimitEncountered = true;
+        }
+        console.warn(`[Hybrid] 段落 ID:${dItem.id} 免Key通道遇阻，自动并入重试队列:`, err.message);
         uncertainItems.push({ id: dItem.id, text: dItem.text, rawText: dItem.text });
         return null;
       }
-    });
+    }, 2, 90);
 
-    const freeResults = (await Promise.all(freePromises)).filter(Boolean);
+    const freeResults = freeResultsRaw.filter(Boolean);
 
     // B. 不确定性/核心学术段落：调用大模型 API Key 进行高精学术推理
     let aiResults = [];
@@ -86,9 +89,9 @@ export async function handleBioTranslate(payload) {
 
     if (uncertainItems.length > 0) {
       if (!apiKey) {
-        // 若未提供 API Key，安全平滑回退走免费通道，并尝试词典硬对齐
+        // 若未提供 API Key，安全平滑回退走免费通道，同样使用节流并发
         console.warn(`[Hybrid:${persona}] 未提供 API Key，所有高危段落降级至免Key通道并注入词典校正`);
-        const fallbackPromises = uncertainItems.map(async (uItem) => {
+        const fallbackResultsRaw = await runThrottled(uncertainItems, async (uItem) => {
           let trans = await translateFreeFast(uItem.rawText || uItem.text, targetLang);
           const terms = itemTermsMap.get(uItem.id) || [];
           for (const t of terms) {
@@ -98,8 +101,8 @@ export async function handleBioTranslate(payload) {
           const rMap = redactionMaps.get(uItem.id);
           trans = restoreSanitizedData(trans, rMap);
           return { id: uItem.id, text: trans, source: 'free_engine_fallback' };
-        });
-        aiResults = await Promise.all(fallbackPromises);
+        }, 2, 110);
+        aiResults = fallbackResultsRaw.filter(Boolean);
       } else {
         // 汇聚全部不确定段落的待译文本与核心生化/经济术语
         const combinedSample = uncertainItems.map(i => i.rawText || i.text).join(' ');
@@ -191,6 +194,7 @@ export async function handleBioTranslate(payload) {
         totalCount: items.length,
         aiCount: aiResults.length,
         freeCount: freeResults.length,
+        rateLimited: rateLimitEncountered,
         savedTokenRatio: items.length > 0 ? `${Math.round((freeResults.length / items.length) * 100)}%` : '0%'
       }
     };
@@ -201,10 +205,10 @@ export async function handleBioTranslate(payload) {
     // 2.1 隐私脱敏
     const { sanitizedText, redactionMap } = sanitizeTextForUpload(text);
 
-    // 2.2 实体遮罩与术语匹配
+    // 2.2 实体遮罩与高危数值硬保护
     const { maskedText, tokenMap } = (persona !== 'general')
       ? maskBioEntities(sanitizedText)
-      : { maskedText: sanitizedText, tokenMap: new Map() };
+      : maskNumericEntities(sanitizedText);
 
     const matchedTerms = (persona !== 'general') ? matchTerms(sanitizedText, 10, persona) : [];
     const uncertainty = (persona !== 'general')

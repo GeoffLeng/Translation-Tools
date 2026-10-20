@@ -92,6 +92,18 @@
           <span>Draw</span>
         </button>
 
+        <!-- 批注辅助工具组 (仅在画笔模式下显示：撤销最后一笔与清空本页) -->
+        <div id="draw-actions-group" class="draw-actions-group hidden">
+          <button id="draw-undo-btn" class="sub-tool-btn with-text compact-btn" data-tooltip-title="撤销批注" data-tooltip-desc="撤销当前页最后一笔手绘涂鸦" data-tooltip-shortcut="Ctrl+Z">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
+            <span>撤销</span>
+          </button>
+          <button id="draw-clear-btn" class="sub-tool-btn with-text compact-btn" data-tooltip-title="清空本页批注" data-tooltip-desc="一键清除当前页面上的全部手绘笔迹">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            <span>清空</span>
+          </button>
+        </div>
+
         <!-- 对照模式切换 (Control Style) -->
         <div class="control-style-group" data-tooltip-title="双语排版模式" data-tooltip-desc="切换版式：Bilingual(双语左右对照)、Original(纯原文)、Translation(纯译文)">
           <span class="sub-label">Control Style</span>
@@ -144,11 +156,6 @@
         </button>
 
         <span id="trans-active-badge" class="trans-status-pill" data-tooltip-title="页面翻译状态" data-tooltip-desc="显示当前页面的翻译状态（未翻译 / 正在翻译 / 混合分流完成）">未翻译</span>
-
-        <button id="help-btn" class="sub-tool-btn with-text" data-tooltip-title="帮助与快捷键" data-tooltip-desc="查看双语对照阅读操作手册与常用快捷键列表">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-          <span>Help</span>
-        </button>
 
         <button id="setup-btn" class="sub-tool-btn with-text" data-tooltip-title="扩展设置中心" data-tooltip-desc="配置翻译服务商、API Key、自定义模型与提示词">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -232,6 +239,10 @@
               <div class="progress-bar-bg">
                 <div id="trans-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
               </div>
+              <div id="free-quota-hint" class="free-quota-hint hidden">
+                <span>⚠️ 当前使用公共免Key通道，已启用防限流平滑调度。配置免费 Gemini/GLM 密钥可享极速！</span>
+                <button type="button" id="open-settings-from-progress" class="free-quota-link">立即配置</button>
+              </div>
             </div>
 
             <!-- Scanned PDF Detection Alert -->
@@ -308,6 +319,65 @@
           <div class="modal-actions-row">
             <button id="cancel-range-btn" class="modal-action-btn">取消</button>
             <button id="start-range-btn" class="modal-action-btn primary">开始选页翻译</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Document Export & Download Modal (全文翻译完成/一键下载中心) -->
+    <div id="download-modal" class="advanced-modal-overlay hidden">
+      <div class="advanced-modal-box download-modal-box" style="max-width: 520px;">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#2563EB" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <h3 id="download-modal-title">下载已翻译文档</h3>
+          </div>
+          <button id="close-download-modal-btn" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <p id="download-modal-desc" class="range-modal-tip" style="margin-bottom: 16px;">文档已成功完成翻译，请选择导出格式：</p>
+          
+          <div class="download-options-list" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+            <!-- 选项 1: 双语对照排版 HTML -->
+            <div class="download-opt-card" id="btn-download-html" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-radius: 12px; border: 1.5px solid #2563eb; background: rgba(37, 99, 235, 0.04); cursor: pointer; transition: all 0.15s ease;">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="width: 38px; height: 38px; border-radius: 10px; background: #2563eb; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px;">📄</div>
+                <div>
+                  <strong style="display: block; font-size: 13.5px; color: #1e293b;">下载双语对照 HTML 文档 (推荐)</strong>
+                  <span style="font-size: 12px; color: #64748b;">高保真左右排版、数学公式保护、浏览器直接翻阅</span>
+                </div>
+              </div>
+              <button type="button" class="modal-action-btn primary" style="padding: 6px 14px; font-size: 12px; pointer-events: none;">立即下载</button>
+            </div>
+
+            <!-- 选项 2: 另存为 PDF / 打印为 PDF -->
+            <div class="download-opt-card" id="btn-print-pdf" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; cursor: pointer; transition: all 0.15s ease;">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="width: 38px; height: 38px; border-radius: 10px; background: #059669; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px;">🖨️</div>
+                <div>
+                  <strong style="display: block; font-size: 13.5px; color: #1e293b;">打印 / 另存为 PDF 文件</strong>
+                  <span style="font-size: 12px; color: #64748b;">调起系统打印，目标打印机选择“另存为 PDF”即可</span>
+                </div>
+              </div>
+              <button type="button" class="modal-action-btn" style="padding: 6px 14px; font-size: 12px; border-color: #059669; color: #059669; pointer-events: none;">另存为 PDF</button>
+            </div>
+
+            <!-- 选项 3: 纯中文 TXT 文档 -->
+            <div class="download-opt-card" id="btn-download-txt" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-radius: 12px; border: 1px solid #e2e8f0; background: #fff; cursor: pointer; transition: all 0.15s ease;">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="width: 38px; height: 38px; border-radius: 10px; background: #7c3aed; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px;">📝</div>
+                <div>
+                  <strong style="display: block; font-size: 13.5px; color: #1e293b;">导出纯中文文本 (.txt)</strong>
+                  <span style="font-size: 12px; color: #64748b;">纯净翻译文字，按页码结构分段，适合导入笔记软件</span>
+                </div>
+              </div>
+              <button type="button" class="modal-action-btn" style="padding: 6px 14px; font-size: 12px; border-color: #7c3aed; color: #7c3aed; pointer-events: none;">下载 TXT</button>
+            </div>
+          </div>
+
+          <div class="modal-actions-row">
+            <button id="close-download-btn" class="modal-action-btn" style="padding: 7px 20px;">完成</button>
           </div>
         </div>
       </div>

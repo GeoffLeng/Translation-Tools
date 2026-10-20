@@ -252,9 +252,15 @@ body {
 }
 
 .sub-tool-btn.active {
-  background: #e5e7eb;
-  color: #111827;
+  background: #2563EB !important;
+  color: #FFFFFF !important;
   font-weight: 600;
+  border-color: #1D4ED8 !important;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.35);
+}
+
+.sub-tool-btn.active svg {
+  stroke: #FFFFFF !important;
 }
 
 .sub-tool-btn.primary-action {
@@ -271,6 +277,35 @@ body {
 .sub-tool-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* 批注操作组 (撤销与清空) */
+.draw-actions-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 2px 4px;
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+}
+
+.draw-actions-group.hidden {
+  display: none !important;
+}
+
+.sub-tool-btn.compact-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  height: 24px;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
+.sub-tool-btn.compact-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
 }
 
 /* 翻页胶囊组件: < 2 / 118 > */
@@ -714,6 +749,7 @@ body {
   cursor: pointer;
   transition: background 0.15s ease, opacity 0.2s ease;
   word-break: break-word;
+  white-space: pre-line;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
   letter-spacing: -0.15px;
 }
@@ -805,6 +841,42 @@ body {
   transition: width 0.2s ease;
 }
 
+.free-quota-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  padding: 6px 10px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  line-height: 1.4;
+  animation: fadeIn 0.25s ease;
+}
+
+.free-quota-hint.hidden {
+  display: none !important;
+}
+
+.free-quota-link {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-weight: 600;
+  font-size: 11.5px;
+  margin-left: 10px;
+  white-space: nowrap;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+.free-quota-link:hover {
+  color: #1d4ed8;
+}
+
 .scanned-pdf-alert {
   width: 100%;
   max-width: 600px;
@@ -834,17 +906,29 @@ body {
    -------------------------------------------------------------------------- */
 .search-modal {
   position: fixed;
-  top: 86px;
-  right: 24px;
   background: #ffffff;
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
   display: flex;
   align-items: center;
   padding: 6px 10px;
   gap: 6px;
   z-index: 1050;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #d1d5db;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.search-highlight {
+  background-color: rgba(255, 224, 102, 0.75) !important;
+  color: #111827 !important;
+  border-bottom: 2px solid #eab308;
+  border-radius: 2px;
+}
+
+.search-highlight.active-match {
+  background-color: rgba(249, 115, 22, 0.85) !important;
+  color: #ffffff !important;
+  border-bottom: 2px solid #ea580c;
 }
 
 .search-input {
@@ -1212,6 +1296,15 @@ input:checked + .slider:before {
   gap: 10px;
 }
 
+.download-opt-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.download-opt-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
 /* 全局轻量 Toast 提示 */
 .pdf-toast {
   position: fixed;
@@ -1315,4 +1408,274 @@ input:checked + .slider:before {
   cursor: pointer;
   outline: none;
   padding: 2px 4px;
+}
+
+/* --------------------------------------------------------------------------
+   Canvas Drawing & Annotation Layer (画笔批注图层)
+   -------------------------------------------------------------------------- */
+.annotation-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.viewer-workspace.mode-draw .textLayer {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+.viewer-workspace.mode-draw .annotation-canvas {
+  pointer-events: auto !important;
+  cursor: crosshair !important;
+  touch-action: none;
+}
+
+/* --------------------------------------------------------------------------
+   PDF Selection Floating Translation Widget & Glassmorphism Panel
+   -------------------------------------------------------------------------- */
+.pdf-float-icon {
+  position: fixed;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0A84FF, #5E5CE6);
+  box-shadow: 0 4px 14px rgba(9, 132, 255, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease;
+  transform: scale(0.9);
+  opacity: 0;
+  z-index: 10000;
+}
+
+.pdf-float-icon.show {
+  transform: scale(1);
+  opacity: 1;
+}
+
+.pdf-float-icon:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 18px rgba(9, 132, 255, 0.5);
+}
+
+.pdf-float-icon svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: white;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pdf-panel {
+  position: fixed;
+  width: 360px;
+  min-height: 160px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px) saturate(190%);
+  -webkit-backdrop-filter: blur(20px) saturate(190%);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  color: #1c1c1e;
+  z-index: 10001;
+  opacity: 0;
+  transform: scale(0.95) translateY(10px);
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pdf-panel.show {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  z-index: 100;
+}
+
+.resize-handle-left {
+  left: 0;
+}
+
+.resize-handle-right {
+  right: 0;
+}
+
+.panel-resize-handle:hover,
+.panel-resize-handle.active {
+  background: rgba(0, 122, 255, 0.15);
+}
+
+.panel-header {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  cursor: move;
+  user-select: none;
+  background: rgba(249, 250, 251, 0.85);
+}
+
+.panel-logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.2px;
+  color: #1f2937;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-select {
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  outline: none;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.panel-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.06);
+  border: none;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  transition: all 0.15s ease;
+}
+
+.panel-close:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.panel-icon-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.05);
+  border: none;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.panel-icon-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: #111827;
+}
+
+.panel-icon-btn.active {
+  background: rgba(37, 99, 235, 0.15);
+  color: #2563eb;
+}
+
+.panel-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-source-text {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 75px;
+  overflow-y: auto;
+  word-break: break-word;
+  background: #f9fafb;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #f3f4f6;
+}
+
+.panel-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.06);
+  margin: 2px 0;
+}
+
+.panel-result-wrapper {
+  position: relative;
+  min-height: 48px;
+}
+
+.panel-result {
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 500;
+  color: #111827;
+  word-break: break-word;
+  white-space: pre-wrap;
+  background: #eff6ff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dbeafe;
+}
+
+.panel-loader {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(37, 99, 235, 0.2);
+  border-radius: 50%;
+  border-top-color: #2563eb;
+  animation: spin 0.8s linear infinite;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin-top: -10px;
+  margin-left: -10px;
 }

@@ -1,4 +1,4 @@
-// Script for Options page (options.js v2.0)
+import { DocStorage, formatBytes, formatTimestamp } from './doc_storage.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   // 1. 侧边栏 Tab 切换逻辑
@@ -13,10 +13,14 @@ document.addEventListener('DOMContentLoaded', () => {
       tabPanes.forEach(pane => pane.classList.remove('active'));
 
       item.classList.add('active');
-      const tabId = item.getAttribute('data-tab') + '-tab';
+      const tabName = item.getAttribute('data-tab');
+      const tabId = tabName + '-tab';
       const targetPane = document.getElementById(tabId);
       if (targetPane) {
         targetPane.classList.add('active');
+      }
+      if (tabName === 'storage') {
+        renderStorageStats();
       }
     });
   });
@@ -1049,6 +1053,135 @@ document.addEventListener('DOMContentLoaded', () => {
     alert('请在模型列表中点击【+ 添加】至少选择一个模型，或直接在输入框中输入模型 ID！');
   });
 
+  // 6. 本地文献存储空间管理逻辑 (IndexedDB)
+  const storageDocCount = document.getElementById('storage-doc-count');
+  const storagePageCount = document.getElementById('storage-page-count');
+  const storagePageDetail = document.getElementById('storage-page-detail');
+  const storageDiskUsage = document.getElementById('storage-disk-usage');
+  const clean30DaysBtn = document.getElementById('clean-30-days-btn');
+  const clearAllStorageBtn = document.getElementById('clear-all-storage-btn');
+  const refreshStorageBtn = document.getElementById('refresh-storage-btn');
+  const jumpToStorageBtn = document.getElementById('jump-to-storage-btn');
+  const storageDocsEmpty = document.getElementById('storage-docs-empty');
+  const storageDocsTableWrapper = document.getElementById('storage-docs-table-wrapper');
+  const storageDocsTbody = document.getElementById('storage-docs-tbody');
+
+  async function renderStorageStats() {
+    if (!storageDocCount) return;
+    try {
+      storageDiskUsage.textContent = '计算中...';
+      const stats = await DocStorage.getStorageStats();
+
+      storageDocCount.textContent = stats.docCount;
+      storagePageCount.textContent = stats.transPageCount + stats.drawPageCount;
+      storagePageDetail.textContent = `${stats.transPageCount} 页译文 · ${stats.drawPageCount} 页批注`;
+      storageDiskUsage.textContent = stats.formattedSize;
+
+      if (!stats.docs || stats.docs.length === 0) {
+        if (storageDocsEmpty) storageDocsEmpty.classList.remove('hidden');
+        if (storageDocsTableWrapper) storageDocsTableWrapper.classList.add('hidden');
+        if (storageDocsTbody) storageDocsTbody.innerHTML = '';
+      } else {
+        if (storageDocsEmpty) storageDocsEmpty.classList.add('hidden');
+        if (storageDocsTableWrapper) storageDocsTableWrapper.classList.remove('hidden');
+        if (storageDocsTbody) {
+          storageDocsTbody.innerHTML = '';
+          stats.docs.forEach((doc) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>
+                <span class="storage-doc-title" title="${doc.title}">${doc.title}</span>
+                <span class="storage-doc-id" title="${doc.id}">${doc.id.substring(0, 36)}...</span>
+              </td>
+              <td>${doc.numPages ? `${doc.numPages} 页` : '-'}</td>
+              <td>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  <span class="storage-badge trans">${doc.transPagesCount} 页译文</span>
+                  <span class="storage-badge draw">${doc.drawPagesCount} 页批注</span>
+                </div>
+              </td>
+              <td style="font-size: 12px; color: #64748b;">${formatTimestamp(doc.updatedAt)}</td>
+              <td style="text-align: center;">
+                <button type="button" class="doc-del-btn" data-doc-id="${doc.id}" title="删除该篇文献的所有本地缓存">删除</button>
+              </td>
+            `;
+            storageDocsTbody.appendChild(tr);
+          });
+
+          // 绑定逐篇删除事件
+          storageDocsTbody.querySelectorAll('.doc-del-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+              const targetDocId = e.currentTarget.getAttribute('data-doc-id');
+              if (confirm('确定要清除这篇文献在本地的全部翻译与批注记录吗？')) {
+                await DocStorage.deleteSingleDoc(targetDocId);
+                renderStorageStats();
+              }
+            });
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('渲染存储空间统计失败:', err);
+    }
+  }
+
+  if (refreshStorageBtn) {
+    refreshStorageBtn.addEventListener('click', () => {
+      renderStorageStats();
+    });
+  }
+
+  if (clean30DaysBtn) {
+    clean30DaysBtn.addEventListener('click', async () => {
+      clean30DaysBtn.disabled = true;
+      clean30DaysBtn.textContent = '清理中...';
+      try {
+        const res = await DocStorage.cleanCacheBefore(30);
+        if (res.deletedDocs === 0) {
+          alert('暂无 30 天前的旧文献缓存，无需清理。');
+        } else {
+          alert(`清理完成！成功清除 ${res.deletedDocs} 篇旧文献，共释放 ${res.deletedPages} 个历史页面缓存。`);
+        }
+      } catch (e) {
+        alert('清理失败: ' + e.message);
+      } finally {
+        clean30DaysBtn.disabled = false;
+        clean30DaysBtn.textContent = '清空 30 天前缓存';
+        renderStorageStats();
+      }
+    });
+  }
+
+  if (clearAllStorageBtn) {
+    clearAllStorageBtn.addEventListener('click', async () => {
+      if (confirm('警告：确定要清空所有保存在 IndexedDB 中的文献翻译和批注记录吗？此操作不可逆。')) {
+        clearAllStorageBtn.disabled = true;
+        clearAllStorageBtn.textContent = '清空中...';
+        try {
+          await DocStorage.clearAllCache();
+          alert('已成功清空全部本地文献缓存！');
+        } catch (e) {
+          alert('清空失败: ' + e.message);
+        } finally {
+          clearAllStorageBtn.disabled = false;
+          clearAllStorageBtn.textContent = '清空所有缓存';
+          renderStorageStats();
+        }
+      }
+    });
+  }
+
+  if (jumpToStorageBtn) {
+    jumpToStorageBtn.addEventListener('click', () => {
+      const storageTabBtn = document.querySelector('[data-tab="storage"]');
+      if (storageTabBtn) storageTabBtn.click();
+    });
+  }
+
   // 初始化加载
   loadSettings();
+  if (window.location.hash === '#storage') {
+    const storageTabBtn = document.querySelector('[data-tab="storage"]');
+    if (storageTabBtn) storageTabBtn.click();
+  }
 });

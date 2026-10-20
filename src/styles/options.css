@@ -764,3 +764,168 @@ input:checked + .slider:before {
   color: #94a3b8;
 }
 
+/* 存储空间管理 (Storage Management) */
+.storage-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.storage-metric-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px 20px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.storage-metric-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+
+.metric-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8e8e93;
+}
+
+.metric-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 6px 0 2px 0;
+}
+
+.metric-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: #007aff;
+  letter-spacing: -0.5px;
+}
+
+.metric-unit {
+  font-size: 13px;
+  font-weight: 500;
+  color: #8e8e93;
+}
+
+.metric-sub {
+  font-size: 11.5px;
+  color: #a1a1aa;
+}
+
+.danger-btn {
+  border: 1px solid rgba(255, 59, 48, 0.3) !important;
+  background: rgba(255, 59, 48, 0.08) !important;
+  color: #ff3b30 !important;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.danger-btn:hover {
+  background: #ff3b30 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(255, 59, 48, 0.25);
+}
+
+.storage-empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+  font-size: 13.5px;
+}
+
+.storage-table-wrapper {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.storage-docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.storage-docs-table th {
+  text-align: left;
+  padding: 10px 16px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.storage-docs-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.storage-docs-table tr:hover td {
+  background: #f8fafc;
+}
+
+.storage-doc-title {
+  font-weight: 600;
+  color: #1e293b;
+  display: block;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-doc-id {
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: SF Mono, Menlo, monospace;
+}
+
+.storage-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.storage-badge.trans {
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+}
+
+.storage-badge.draw {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.doc-del-btn {
+  padding: 3px 8px;
+  font-size: 11.5px;
+  border-radius: 6px;
+  border: 1px solid #fee2e2;
+  background: #fff;
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.doc-del-btn:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+

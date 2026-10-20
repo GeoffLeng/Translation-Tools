@@ -185,15 +185,40 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
 }
 
 // 2. 传统与免 Key 翻译服务逻辑
+let bgGoogleCooldownUntil = 0;
+const BG_GOOGLE_CLIENTS = ['gtx', 'dict-chrome-ex', 'webapp'];
+let bgClientIndex = 0;
+
 async function translateGoogle(text, targetLang) {
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
-  const res = await fetchWithTimeout(url, {}, 10000);
-  if (!res.ok) throw new Error(`Google API 错误: ${res.statusText}`);
-  const data = await res.json();
-  if (data && Array.isArray(data[0])) {
-    return data[0].map(item => (item && item[0] ? item[0] : '')).join('');
+  if (!text || typeof text !== 'string') return '';
+  const now = Date.now();
+  if (now < bgGoogleCooldownUntil) {
+    throw new Error('Google 通道处于冷却保护期 (429)');
   }
-  throw new Error('Google 翻译没有返回有效内容');
+
+  for (let i = 0; i < BG_GOOGLE_CLIENTS.length; i++) {
+    const client = BG_GOOGLE_CLIENTS[(bgClientIndex + i) % BG_GOOGLE_CLIENTS.length];
+    const url = `https://translate.googleapis.com/translate_a/single?client=${client}&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+    try {
+      const res = await fetchWithTimeout(url, {}, 8000);
+      if (res.status === 429) {
+        bgGoogleCooldownUntil = Date.now() + 8000;
+        bgClientIndex = (bgClientIndex + 1) % BG_GOOGLE_CLIENTS.length;
+        continue;
+      }
+      if (!res.ok) throw new Error(`Google API 错误: ${res.status}`);
+      const data = await res.json();
+      if (data && Array.isArray(data[0])) {
+        return data[0].map(item => (item && item[0] ? item[0] : '')).join('');
+      }
+    } catch (e) {
+      if (e.message && e.message.includes('429')) {
+        bgGoogleCooldownUntil = Date.now() + 8000;
+        continue;
+      }
+    }
+  }
+  throw new Error('Google 免Key接口限流或不可用');
 }
 
 // Bing 翻译 (免 Key·微软全球高速通道)
@@ -407,6 +432,40 @@ async function translateYoudao(text, targetLang, appKey, appSecret) {
   throw new Error(errorMessages[data.errorCode] || `有道智云接口错误代码: ${data.errorCode}`);
 }
 
+// 2.9 高危数值与科学计数法硬遮罩保护引擎 (Deterministic Number Masker)
+function maskNumericEntities(text) {
+  if (!text || typeof text !== 'string') return { maskedText: text, tokenMap: new Map() };
+  const tokenMap = new Map();
+  let counter = 0;
+
+  function replaceWithToken(matchStr) {
+    const token = `__NUM_${counter++}__`;
+    tokenMap.set(token, matchStr);
+    return token;
+  }
+
+  let result = text;
+  result = result.replace(/\b\d+(?:\.\d+)?\s*[×x*]\s*10[\^⁻⁺⁰¹²³⁴⁵⁶⁷⁸⁹\-+\d]+/g, (m) => replaceWithToken(m));
+  result = result.replace(/\b10[\^⁻⁺⁰¹²³⁴⁵⁶⁷⁸⁹\-+\d]+/g, (m) => replaceWithToken(m));
+  result = result.replace(/\b\d+(?:\.\d+)?[eE][-+]?\d+\b/g, (m) => replaceWithToken(m));
+  result = result.replace(/[-−–]?\d+(?:\.\d+)?\s*(?:°C|℃|°F|K|mg\/[mμn]?L|[mμn]?M|%|rpm|kDa|bp|kb)?\s*(?:[-~–—]|to)\s*[-−–]?\d+(?:\.\d+)?\s*(?:°C|℃|°F|K|mg\/[mμn]?L|[mμn]?M|%|rpm|kDa|bp|kb)\b/gi, (m) => replaceWithToken(m));
+  result = result.replace(/[-−–]\s*\d+(?:\.\d+)?\s*(?:°C|℃|°F|K)\b/gi, (m) => replaceWithToken(m));
+  result = result.replace(/[±]\s*\d+(?:\.\d+)?(?:\s*(?:%|[a-zA-Z\/]+))?/g, (m) => replaceWithToken(m));
+  result = result.replace(/[-−]\s*\d+(?:\.\d+)?%/g, (m) => replaceWithToken(m));
+
+  return { maskedText: result, tokenMap };
+}
+
+function unmaskNumericEntities(translatedText, tokenMap) {
+  if (!translatedText || !tokenMap || tokenMap.size === 0) return translatedText;
+  let result = translatedText;
+  tokenMap.forEach((originalValue, token) => {
+    const fuzzyRegex = new RegExp(token.replace(/_/g, '[_\\s]?'), 'gi');
+    result = result.replace(fuzzyRegex, originalValue);
+  });
+  return result;
+}
+
 // 3. AI 翻译服务逻辑
 
 // Google Gemini 官方接口翻译 (终身免费额度)
@@ -416,10 +475,17 @@ async function translateGemini(text, targetLang, apiKey, modelName) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
   
-  const prompt = `你是一个专业的翻译官。请将以下文本翻译为${langName}。如果输入内容已经是${langName}，则将其翻译为另一种语言（如中英互译）。
+  const { maskedText, tokenMap } = maskNumericEntities(text);
+
+  const prompt = `你是一个专业的学术与通用翻译官。请将以下文本翻译为${langName}。如果输入内容已经是${langName}，则将其翻译为另一种语言（如中英互译）。
+请严格遵循以下规则：
+1. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围（如 15, 2024, 0.05, 95%）必须 100% 保持原始阿拉伯数字形态与格式，严禁写成汉字数字。
+2. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、机构名称、学术专有名词、专属缩写，仅在首次出现时在中文定名后以半角括号附带原文或缩写（如“世界自然基金会 (World Wildlife Fund)”）；后续再次出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
+3. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，必须严格保持相同行数与换行符位置，严禁跨行合并；若是普通连贯正文段落，保持自然流畅，切勿切碎。
+4. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 国际单位必须保留英文符号，严禁汉化；形如 __NUM_0__ 的占位符严禁篡改或丢失。
 请直接输出翻译结果，不要包含任何前导词、解释、注脚或标点说明。
 待翻译文本如下：
-${text}`;
+${maskedText}`;
 
   const res = await fetchWithTimeout(url, {
     method: 'POST',
@@ -436,7 +502,8 @@ ${text}`;
 
   const data = await res.json();
   if (data.candidates && data.candidates[0]?.content?.parts[0]) {
-    return data.candidates[0].content.parts[0].text.trim();
+    const rawOut = data.candidates[0].content.parts[0].text.trim();
+    return unmaskNumericEntities(rawOut, tokenMap);
   }
   throw new Error('Gemini 没有返回有效翻译内容');
 }
@@ -448,6 +515,8 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
 
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
   
+  const { maskedText, tokenMap } = maskNumericEntities(text);
+
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,
@@ -463,11 +532,17 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
       messages: [
         {
           role: 'system',
-          content: '你是一个专业的翻译官。请直接将用户输入的文本翻译为目标语言。请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。'
+          content: `你是一个专业的学术与通用翻译官。请直接将用户输入的文本翻译为目标语言。
+严格规则：
+1. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保持原始阿拉伯数字形态，绝对禁止转写为汉字。
+2. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、学术机构、组织及专属缩写，仅在当前段落首次出现时在中文译名后以半角括号附带原文或缩写（如“世界自然基金会 (World Wildlife Fund)”）；后续再次出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
+3. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，必须严格保持相同行数与换行，严禁跨行合并；若是普通连贯正文段落，保持自然通顺，切勿机械切碎。
+4. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 单位保留英文字符；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。
+请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`
         },
         {
           role: 'user',
-          content: `将以下文本翻译为 ${langName}：\n\n${text}`
+          content: `将以下文本翻译为 ${langName}：\n\n${maskedText}`
         }
       ],
       temperature: 0.3
@@ -484,14 +559,14 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
   if (choice) {
     const content = choice.message?.content;
     if (typeof content === 'string' && content.trim()) {
-      return content.trim();
+      return unmaskNumericEntities(content.trim(), tokenMap);
     }
     if (Array.isArray(content)) {
       const merged = content.map(part => (part && part.text) ? part.text : '').join('').trim();
-      if (merged) return merged;
+      if (merged) return unmaskNumericEntities(merged, tokenMap);
     }
     if (choice.text && typeof choice.text === 'string' && choice.text.trim()) {
-      return choice.text.trim();
+      return unmaskNumericEntities(choice.text.trim(), tokenMap);
     }
   }
   throw new Error('API 没有返回有效的翻译文本内容');
@@ -504,6 +579,13 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
 
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
   
+  const tokenMaps = new Map();
+  const maskedItems = items.map(item => {
+    const { maskedText, tokenMap } = maskNumericEntities(item.text);
+    tokenMaps.set(item.id, tokenMap);
+    return { id: item.id, text: maskedText };
+  });
+
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,
@@ -516,15 +598,21 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
 请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。
 学术翻译强制要求：
 1. 术语严格符合《中国化学会命名原则》与全国科学技术名词审定委员会《生物化学名词》标准。
-2. 严禁字面硬翻实验标准方法 (如 Western blot 必须译为 免疫印迹法，严禁译为西部污点；RT-qPCR 译为 逆转录定量PCR；Apoptosis 译为 细胞凋亡；Enantiomer 译为 对映异构体；Chiral 译为 手性)。
-3. 英文弱被动句应转换为符合中文自然学术文献习惯的客观表述。
-4. 保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`
+2. 严禁字面硬翻实验标准方法 (如 Western blot 译为 免疫印迹法；RT-qPCR 译为 逆转录定量PCR；Apoptosis 译为 细胞凋亡)。
+3. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保持原始阿拉伯数字形态与格式，严禁转写为汉字。
+4. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、机构名称、国际组织、学术专属名词仅在当前页首次出现时紧跟半角括号备注原文，如“世界自然基金会 (World Wildlife Fund)”；后续重复出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
+5. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，译文必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯，切勿生硬切碎。
+6. 国际单位与占位符保护：mg, mL, μm, kDa 等 SI 单位绝对保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改。
+7. 保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`
     : `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
 严格遵循以下要求：
 1. 保持每一个对象的 "id" 字段与原始输入严格一致。
-2. 仅翻译 "text" 字段的内容，专业学术术语翻译需严谨规范。
-3. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
-4. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释、前导词或注脚。`;
+2. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保留阿拉伯数字形态，绝对禁止转写为汉字。
+3. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、学术机构、组织及专有缩写，仅在当前页首次出现时在中文定名后紧跟半角括号备注原文，如“世界自然基金会 (World Wildlife Fund)”；后续重复出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
+4. 多行标题与自然段落智能区分：包含换行符 \\n 的独立多行标题、清单或元数据必须严格保持相同行数与换行符位置；普通正文段落保持自然通顺，切勿切断成碎片。
+5. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 单位保留英文字符；形如 __NUM_0__ 的占位符严禁篡改或丢失。
+6. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
+7. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释、前导词或注脚。`;
 
   if (context && (context.prefix || context.suffix)) {
     systemPrompt += `\n\n【重要：跨页上下文语境参考 (用于消除跨页断句与代词歧义)】
@@ -536,7 +624,7 @@ ${context.suffix ? `【后置页面开头上下文 (仅作为理解下文句意�
 - 如果当前页末尾句子尚未结束，请结合【后置页面开头上下文】理解完整句意后，仅将当前页所含部分准确翻译，绝对严禁将后置上下文的内容输出在当前页的译文中！`;
   }
 
-  const userPrompt = JSON.stringify(items.map(item => ({ id: item.id, text: item.text })));
+  const userPrompt = JSON.stringify(maskedItems.map(item => ({ id: item.id, text: item.text })));
 
   const res = await fetchWithTimeout(endpoint, {
     method: 'POST',
@@ -572,7 +660,13 @@ ${context.suffix ? `【后置页面开头上下文 (仅作为理解下文句意�
   try {
     const parsed = JSON.parse(cleanJson);
     if (Array.isArray(parsed)) {
-      return parsed.map(p => ({ id: p.id, text: p.text }));
+      return parsed.map(p => {
+        const tMap = tokenMaps.get(p.id);
+        return {
+          id: p.id,
+          text: tMap ? unmaskNumericEntities(p.text, tMap) : p.text
+        };
+      });
     }
   } catch (parseErr) {
     const matched = [];
@@ -585,7 +679,15 @@ ${context.suffix ? `【后置页面开头上下文 (仅作为理解下文句意�
         matched.push({ id: idVal, text: textVal });
       } catch (e) {}
     }
-    if (matched.length > 0) return matched;
+    if (matched.length > 0) {
+      return matched.map(p => {
+        const tMap = tokenMaps.get(p.id);
+        return {
+          id: p.id,
+          text: tMap ? unmaskNumericEntities(p.text, tMap) : p.text
+        };
+      });
+    }
     throw new Error('批量翻译解析 JSON 失败: ' + parseErr.message);
   }
   throw new Error('批量翻译返回数据非数组格式');
@@ -597,12 +699,22 @@ async function translateBatchGemini(items, targetLang, apiKey, modelName, contex
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
   const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
 
+  const tokenMaps = new Map();
+  const maskedItems = items.map(item => {
+    const { maskedText, tokenMap } = maskNumericEntities(item.text);
+    tokenMaps.set(item.id, tokenMap);
+    return { id: item.id, text: maskedText };
+  });
+
   let prompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
 严格遵循以下要求：
 1. 保持每一个对象的 "id" 字段与原始输入严格一致。
-2. 仅翻译 "text" 字段的内容。
-3. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
-4. 严禁包含任何 Markdown 标记（如 \`\`\`json ），严禁附加任何解释。`;
+2. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保留阿拉伯数字形态，绝对禁止转写为汉字。
+3. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、学术机构、组织及专有缩写，仅在当前页首次出现时在中文定名后紧跟半角括号备注原文，如“世界自然基金会 (World Wildlife Fund)”；后续重复出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
+4. 多行标题与自然段落智能区分：包含换行符 \\n 的独立多行标题、清单或元数据必须严格保持相同行数与换行符位置；普通正文段落保持自然通顺，切勿切断成碎片。
+5. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 单位保留英文字符；形如 __NUM_0__ 的占位符严禁篡改或丢失。
+6. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
+7. 严禁包含任何 Markdown 标记（如 \`\`\`json ），严禁附加任何解释。`;
 
   if (context && (context.prefix || context.suffix)) {
     prompt += `\n\n【跨页上下文语境参考】
@@ -612,7 +724,7 @@ ${context.suffix ? `【后置页面开头参考 (仅供理解下文，严禁翻�
   }
 
   prompt += `\n待翻译数据：
-${JSON.stringify(items.map(i => ({ id: i.id, text: i.text })))}`;
+${JSON.stringify(maskedItems.map(i => ({ id: i.id, text: i.text })))}`;
 
   const res = await fetchWithTimeout(url, {
     method: 'POST',
@@ -635,7 +747,13 @@ ${JSON.stringify(items.map(i => ({ id: i.id, text: i.text })))}`;
   try {
     const parsed = JSON.parse(cleanJson);
     if (Array.isArray(parsed)) {
-      return parsed.map(p => ({ id: p.id, text: p.text }));
+      return parsed.map(p => {
+        const tMap = tokenMaps.get(p.id);
+        return {
+          id: p.id,
+          text: tMap ? unmaskNumericEntities(p.text, tMap) : p.text
+        };
+      });
     }
   } catch (e) {
     const matched = [];
@@ -648,16 +766,23 @@ ${JSON.stringify(items.map(i => ({ id: i.id, text: i.text })))}`;
         matched.push({ id: idVal, text: textVal });
       } catch (err) {}
     }
-    if (matched.length > 0) return matched;
+    if (matched.length > 0) {
+      return matched.map(p => {
+        const tMap = tokenMaps.get(p.id);
+        return {
+          id: p.id,
+          text: tMap ? unmaskNumericEntities(p.text, tMap) : p.text
+        };
+      });
+    }
     throw new Error('Gemini 批量翻译解析 JSON 失败');
   }
   throw new Error('Gemini 批量翻译返回数据非数组格式');
 }
 
 async function translateBatchGoogle(items, targetLang) {
-  // 并发请求翻译各个独立段落，彻底消除分隔符被误翻译（如_分割_标签）导致的串段与文字重叠
   const results = new Array(items.length);
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 2;
   let cursor = 0;
 
   async function worker() {
@@ -666,11 +791,18 @@ async function translateBatchGoogle(items, targetLang) {
       if (idx >= items.length) break;
       const item = items[idx];
       try {
-        const trans = await translateGoogle(item.text, targetLang);
+        let trans = await translateGoogle(item.text, targetLang);
         results[idx] = { id: item.id, text: trans || item.text };
       } catch (err) {
-        results[idx] = { id: item.id, text: item.text };
+        // Google 429 降级尝试 Bing
+        try {
+          let trans = await translateBing(item.text, targetLang);
+          results[idx] = { id: item.id, text: trans || item.text };
+        } catch (bingErr) {
+          results[idx] = { id: item.id, text: item.text };
+        }
       }
+      await new Promise(r => setTimeout(r, 90));
     }
   }
 
