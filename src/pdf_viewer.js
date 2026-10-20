@@ -2747,11 +2747,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 6.5 整页 JSON 结构化批量翻译 API (优先走本地多角色学术引擎与隐私脱敏，支持跨页语境 context 注入)
+  // 6.5 整页 JSON 结构化批量翻译 API (优先走本地学术引擎，无 Node 环境时 0 延迟秒级回退至扩展 Background)
+  let localServerReachable = null; // null: 未探测, true: 本地 Node 可用, false: 纯扩展模式直连
+
   function requestBatchTranslation(items, engine, targetLang, model, context = null, persona = 'biochem') {
     return new Promise((resolve, reject) => {
       // 统一角色标识 (向后兼容 boolean 参数: true -> 'biochem', false -> 'general')
       const activePersona = typeof persona === 'string' ? persona : (persona ? 'biochem' : 'general');
+
+      // 若已确认无本地独立 Node.js 服务，直接 0 延迟由扩展 Background 承接
+      if (localServerReachable === false) {
+        fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
+        return;
+      }
 
       chrome.storage.local.get({
         deepseekApiKey: '',
@@ -2786,6 +2794,7 @@ document.addEventListener('DOMContentLoaded', () => {
             enableHybrid: true
           })
         }).then(r => r.json()).then(res => {
+          localServerReachable = true;
           if (res && res.success && Array.isArray(res.translations)) {
             if (res.dispatchStats) {
               console.log(`[${activePersona} 智能分流] ${res.dispatchStats.totalCount} 段落处理完毕: ${res.dispatchStats.freeCount} 段免Key直达，${res.dispatchStats.aiCount} 段大模型推理 (节约 Token: ${res.dispatchStats.savedTokenRatio})`);
@@ -2804,7 +2813,8 @@ document.addEventListener('DOMContentLoaded', () => {
           // 本地接口异常时无缝回退到扩展 background
           fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
         }).catch(() => {
-          // 本地服务未开时平滑回退
+          // 本地未安装/未启动 Node 服务：记录状态并 0 毫秒平滑由扩展原生接管
+          localServerReachable = false;
           fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
         });
       });
