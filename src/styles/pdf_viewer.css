@@ -19,15 +19,19 @@
   box-sizing: border-box;
 }
 
-body {
+html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+}
+
+body {
   background-color: var(--bg-workspace);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: #111827;
   -webkit-font-smoothing: antialiased;
-  height: 100vh;
-  overflow: hidden;
 }
 
 .hidden {
@@ -38,13 +42,18 @@ body {
   display: none;
 }
 
-/* 页面主干布局 */
+/* 页面主干布局: 锁定视口，防止整体页面被任何内部滚动带偏 */
 .viewer-layout {
   display: flex;
   flex-direction: column;
+  width: 100vw;
   height: 100vh;
   overflow: hidden;
-  position: relative;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -385,27 +394,32 @@ body {
   font-weight: 500;
 }
 
-/* 顶栏收起后的悬浮展开按键 */
+/* 顶栏收起后的悬浮展开按键 (居中高对比醒目呈现，支持 Esc 随时退出) */
 .show-top-floating-btn {
   position: fixed;
-  top: 8px;
-  right: 20px;
-  z-index: 1050;
-  background: rgba(17, 24, 39, 0.85);
-  backdrop-filter: blur(8px);
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  background: rgba(17, 24, 39, 0.92);
+  backdrop-filter: blur(10px);
   color: #ffffff;
-  border: none;
-  padding: 5px 12px;
-  border-radius: 16px;
-  font-size: 11.5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 6px 18px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  transition: all 0.2s;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .show-top-floating-btn:hover {
-  background: #111827;
-  transform: translateY(1px);
+  background: #000000;
+  transform: translateX(-50%) translateY(1px);
 }
 
 /* --------------------------------------------------------------------------
@@ -613,24 +627,34 @@ body {
   align-items: center;
 }
 
-/* 页面容器 */
-.pdf-page-container {
-  position: relative;
+/* 页面容器：原文与译文对称容器统一拥有 position: relative 且物理裁剪溢出 */
+.page-container,
+.pdf-page-container,
+.trans-page-container,
+.trans-stage-container,
+.trans-stage-wrapper {
+  position: relative !important;
   margin-bottom: 20px;
   background: #ffffff;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
   border-radius: 3px;
-  overflow: visible;
+  overflow: hidden !important;
+  box-sizing: border-box;
 }
 
-.pdf-page-container canvas {
+.page-container canvas,
+.pdf-page-container canvas,
+.trans-page-container canvas,
+.trans-stage-container canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
 /* 骨架占位态 */
-.pdf-page-container.is-unloaded {
+.page-container.is-unloaded,
+.pdf-page-container.is-unloaded,
+.trans-page-container.is-unloaded {
   background: #fdfdfd;
   display: flex;
   align-items: center;
@@ -670,20 +694,15 @@ body {
 /* --------------------------------------------------------------------------
    Inpainting Translated Text Overlays (1:1 原排版译文覆盖层)
    -------------------------------------------------------------------------- */
-.trans-stage-wrapper {
-  position: relative;
-  margin-bottom: 20px;
-  background: #ffffff;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
-  border-radius: 3px;
-  overflow: visible;
-}
-
 .trans-overlay-layer {
-  position: absolute;
-  inset: 0;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   pointer-events: auto;
   z-index: 5;
+  overflow: hidden !important;
 }
 
 /* 原排版文本块 */
@@ -1056,4 +1075,158 @@ input:checked + .slider:before {
   font-size: 13.5px;
   font-weight: 500;
   color: #374151;
+}
+
+/* --------------------------------------------------------------------------
+   Thumbnail Translation Badge & Range Modal Enhancements
+   -------------------------------------------------------------------------- */
+.thumb-card {
+  position: relative;
+}
+
+.thumb-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: #10b981;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(16, 185, 129, 0.4);
+  z-index: 5;
+}
+
+.thumb-card.is-translated .thumb-badge {
+  display: flex;
+}
+
+/* 选页范围翻译模态框 */
+.range-modal-box {
+  max-width: 490px;
+}
+
+.range-modal-tip {
+  font-size: 13px;
+  color: #4b5563;
+  margin: 0 0 14px 0;
+  line-height: 1.5;
+}
+
+.range-modal-tip code {
+  background: #e5e7eb;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #1f2937;
+}
+
+.range-input-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.range-input-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.range-text-field {
+  flex: 1;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: #111827;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.range-text-field:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.range-preset-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.range-preset-title {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.range-preset-btn {
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.range-preset-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.range-info-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #15803d;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.range-info-banner.has-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.modal-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 全局轻量 Toast 提示 */
+.pdf-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(17, 24, 39, 0.92);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 500;
+  z-index: 9999;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
 }

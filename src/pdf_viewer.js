@@ -79,6 +79,27 @@ document.addEventListener('DOMContentLoaded', () => {
   const searchMatches = document.getElementById('search-matches');
   const closeSearchBtn = document.getElementById('close-search-btn');
 
+  // 沉浸式选页翻译专属 DOM 控件
+  const translateRangeBtn = document.getElementById('translate-range-btn');
+  const rangeModal = document.getElementById('range-modal');
+  const closeRangeModalBtn = document.getElementById('close-range-modal-btn');
+  const cancelRangeBtn = document.getElementById('cancel-range-btn');
+  const startRangeBtn = document.getElementById('start-range-btn');
+  const rangePagesInput = document.getElementById('range-pages-input');
+  const rangeCalcStatus = document.getElementById('range-calc-status');
+
+  let toastTimer = null;
+  function showToast(msg) {
+    const toast = document.getElementById('pdf-toast');
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.classList.add('hidden');
+    }, 2200);
+  }
+
   let currentPdf = null;
   let currentScale = 1.2;
   let currentPage = 1;
@@ -445,8 +466,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }, callback);
   }
 
-  // 监听 PDF 容器中的划词
-  viewerContainer.addEventListener('mouseup', (e) => {
+  // 监听全工作区划词（原文、译文、双语对照均可无缝划词查词）
+  const selectionArea = viewerWorkspace || viewerContainer;
+  selectionArea.addEventListener('mouseup', (e) => {
     if (e.target.closest('#pdf-translate-panel') || e.target.closest('#pdf-float-icon')) return;
 
     setTimeout(() => {
@@ -827,6 +849,7 @@ document.addEventListener('DOMContentLoaded', () => {
       nextPageBtn.disabled = false;
       if (translatePageBtn) translatePageBtn.disabled = false;
       if (translateDocBtn) translateDocBtn.disabled = false;
+      if (translateRangeBtn) translateRangeBtn.disabled = false;
 
       // 提取第 1 页基准比例，预计算所有页面的骨架占位
       const firstPage = await currentPdf.getPage(1);
@@ -834,23 +857,36 @@ document.addEventListener('DOMContentLoaded', () => {
       const defaultW = Math.round(firstViewport.width);
       const defaultH = Math.round(firstViewport.height);
 
-      // 高效批量创建左侧原文空容器占位（仅轻量 DOM 骨架，无 Canvas 纹理开销）
+      // 高效批量创建左侧原文与右侧译文对称占位（双栏 1:1 同步滚动与绝对排版对齐）
       const fragment = document.createDocumentFragment();
+      const fragmentTrans = document.createDocumentFragment();
 
       for (let i = 1; i <= currentPdf.numPages; i++) {
+        // 左侧原文容器
         const pageContainer = document.createElement('div');
-        pageContainer.className = 'page-container is-unloaded';
+        pageContainer.id = `page-container-${i}`;
+        pageContainer.className = 'page-container pdf-page-container is-unloaded';
         pageContainer.dataset.pageNum = i;
         pageContainer.style.width = `${defaultW}px`;
         pageContainer.style.height = `${defaultH}px`;
         pageContainer.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${i} 页 原文</span></div>`;
         fragment.appendChild(pageContainer);
+
+        // 右侧译文容器（1:1 对称槽位）
+        const transContainer = document.createElement('div');
+        transContainer.id = `page-trans-container-${i}`;
+        transContainer.className = 'page-container pdf-page-container trans-page-container is-unloaded';
+        transContainer.dataset.pageNum = i;
+        transContainer.style.width = `${defaultW}px`;
+        transContainer.style.height = `${defaultH}px`;
+        transContainer.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${i} 页 译文</span></div>`;
+        fragmentTrans.appendChild(transContainer);
       }
       viewerContainer.appendChild(fragment);
 
-      // 方案 1：右侧采用独立靶向舞台（Dedicated Current-Page Stage），不再构建多页虚拟占位
       if (viewerContainerTrans) {
         viewerContainerTrans.innerHTML = '';
+        viewerContainerTrans.appendChild(fragmentTrans);
         renderTransStageForPage(currentPage);
       }
 
@@ -898,8 +934,15 @@ document.addEventListener('DOMContentLoaded', () => {
       label.className = 'thumb-label';
       label.textContent = `${i}`;
 
+      const badge = document.createElement('span');
+      badge.id = `thumb-badge-${i}`;
+      const isDone = pageTranslations.has(i) && pageTranslations.get(i).length > 0 && pageTranslations.get(i).some(b => b.transText);
+      badge.className = `thumb-badge ${isDone ? '' : 'hidden'}`;
+      badge.textContent = '✓';
+
       card.appendChild(canvas);
       card.appendChild(label);
+      card.appendChild(badge);
 
       card.addEventListener('click', () => {
         scrollToPage(i);
@@ -951,13 +994,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function updateThumbnailStatus(pageNum) {
+    if (!sidebarThumbnailsList) return;
+    const badge = document.getElementById(`thumb-badge-${pageNum}`);
+    if (badge) {
+      const cached = pageTranslations.get(pageNum);
+      const isDone = cached && cached.length > 0 && cached.some(b => b.transText);
+      badge.classList.toggle('hidden', !isDone);
+    }
+  }
+
+  // 虚拟化视口监听器：进入视口挂载渲染，移出视口彻底销毁 Canvas 回收显存
   // 虚拟化视口监听器：进入视口挂载渲染，移出视口彻底销毁 Canvas 回收显存
   function setupVirtualObserver(renderId) {
     if (pageObserver) pageObserver.disconnect();
 
     pageObserver = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
-        const pageNum = parseInt(entry.target.dataset.pageNum);
+        const pageNum = parseInt(entry.target.dataset.pageNum, 10);
         if (entry.isIntersecting) {
           mountPage(pageNum, renderId);
         } else {
@@ -965,8 +1019,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     }, {
-      root: pdfPane || viewerMain,
-      rootMargin: '400px 0px', // 上下缓冲半页，平滑滚屏无白屏闪烁
+      root: viewerMain,
+      rootMargin: '600px 0px', // 上下缓冲一页，平滑滚屏无白屏闪烁
       threshold: 0
     });
 
@@ -974,34 +1028,60 @@ document.addEventListener('DOMContentLoaded', () => {
     pages.forEach(p => pageObserver.observe(p));
   }
 
-  // 页面阅读位置追踪与页码同步
+  // 页面阅读位置追踪与页码同步 (精准捕获主视口真实滚动位置)
   function setupScrollSpy() {
-    if (!pdfPane) return;
-    pdfPane.addEventListener('scroll', () => {
-      if (!currentPdf) return;
-      const pages = viewerContainer.querySelectorAll('.page-container');
-      const paneTop = pdfPane.getBoundingClientRect().top;
-      let closestPage = 1;
-      let minDistance = Infinity;
+    if (!viewerMain) return;
+    let ticking = false;
 
-      pages.forEach(p => {
-        const rect = p.getBoundingClientRect();
-        const dist = Math.abs(rect.top - paneTop);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestPage = parseInt(p.dataset.pageNum, 10);
+    viewerMain.addEventListener('scroll', () => {
+      if (!currentPdf || ticking) return;
+      ticking = true;
+
+      requestAnimationFrame(() => {
+        ticking = false;
+        const pages = viewerContainer.querySelectorAll('.page-container');
+        if (pages.length === 0) return;
+
+        const mainRect = viewerMain.getBoundingClientRect();
+        // 视口锚定线：顶部向下 80px
+        const targetLine = mainRect.top + 80;
+
+        let closestPage = currentPage;
+        let minDistance = Infinity;
+
+        pages.forEach(p => {
+          const rect = p.getBoundingClientRect();
+          if (rect.top <= targetLine && rect.bottom >= targetLine) {
+            closestPage = parseInt(p.dataset.pageNum, 10);
+            minDistance = 0;
+          } else {
+            const dist = Math.abs(rect.top - targetLine);
+            if (dist < minDistance) {
+              minDistance = dist;
+              closestPage = parseInt(p.dataset.pageNum, 10);
+            }
+          }
+        });
+
+        if (closestPage !== currentPage) {
+          currentPage = closestPage;
+          if (pageNumInput) pageNumInput.value = currentPage;
+          updatePaginationButtons();
+          updateActiveThumbnail(currentPage);
+
+          // 更新状态指示徽章
+          if (pageTranslations.has(currentPage) && pageTranslations.get(currentPage).length > 0) {
+            if (transActiveBadge) transActiveBadge.textContent = `已翻译 (第 ${currentPage} 页)`;
+          } else {
+            if (transActiveBadge) transActiveBadge.textContent = `第 ${currentPage} 页 (未翻译)`;
+          }
+
+          // 保持右侧双语对照联动
+          if (translationPane && !translationPane.classList.contains('hidden')) {
+            renderTransStageForPage(currentPage);
+          }
         }
       });
-
-      if (closestPage !== currentPage) {
-        currentPage = closestPage;
-        if (pageNumInput) pageNumInput.value = currentPage;
-        updatePaginationButtons();
-        updateActiveThumbnail(currentPage);
-        if (translationPane && !translationPane.classList.contains('hidden')) {
-          renderTransStageForPage(currentPage);
-        }
-      }
     }, { passive: true });
   }
 
@@ -1020,38 +1100,45 @@ document.addEventListener('DOMContentLoaded', () => {
     updateActiveThumbnail(currentPage);
 
     const targetLeft = viewerContainer.querySelector(`.page-container[data-page-num="${currentPage}"]`);
-    if (targetLeft) {
-      targetLeft.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (targetLeft && viewerMain) {
+      // 安全容器内平滑滚动，绝不触发 window / document 级偏移，保障顶栏坚如磐石
+      const targetOffsetTop = targetLeft.offsetTop;
+      viewerMain.scrollTo({
+        top: Math.max(0, targetOffsetTop - 16),
+        behavior: 'smooth'
+      });
     }
     if (translationPane && !translationPane.classList.contains('hidden')) {
       renderTransStageForPage(currentPage);
     }
   }
 
-  // 方案 1：右侧当前页独立靶向画板（Stage）渲染引擎
+  // 右侧 1:1 对称槽位页面渲染引擎
   let currentTransStageRenderTask = null;
 
   async function renderTransStageForPage(pageNum) {
     if (!viewerContainerTrans || !currentPdf) return null;
     const targetPageNum = Math.max(1, Math.min(pageNum || currentPage, currentPdf.numPages));
 
-    let stageContainer = viewerContainerTrans.querySelector('#trans-stage-page');
+    let stageContainer = viewerContainerTrans.querySelector(`.page-container[data-page-num="${targetPageNum}"]`);
     if (!stageContainer) {
-      viewerContainerTrans.innerHTML = '';
       stageContainer = document.createElement('div');
-      stageContainer.id = 'trans-stage-page';
-      stageContainer.className = 'trans-stage-container';
+      stageContainer.id = `page-trans-container-${targetPageNum}`;
+      stageContainer.className = 'page-container pdf-page-container trans-page-container is-unloaded';
+      stageContainer.dataset.pageNum = targetPageNum;
       viewerContainerTrans.appendChild(stageContainer);
     }
 
     stageContainer.dataset.pageNum = targetPageNum;
 
-    // 更新右栏标题状态指示
+    // 更新状态指示
     const hasTrans = pageTranslations.has(targetPageNum) && pageTranslations.get(targetPageNum).length > 0;
-    if (hasTrans) {
-      transActiveBadge.textContent = `已翻译 (第 ${targetPageNum} 页)`;
-    } else {
-      transActiveBadge.textContent = `第 ${targetPageNum} 页`;
+    if (targetPageNum === currentPage && transActiveBadge) {
+      if (hasTrans) {
+        transActiveBadge.textContent = `已翻译 (第 ${targetPageNum} 页)`;
+      } else {
+        transActiveBadge.textContent = `第 ${targetPageNum} 页 (未翻译)`;
+      }
     }
 
     try {
@@ -1065,6 +1152,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let canvas = stageContainer.querySelector('canvas');
       if (!canvas) {
+        stageContainer.innerHTML = '';
         canvas = document.createElement('canvas');
         stageContainer.appendChild(canvas);
       }
@@ -1085,6 +1173,8 @@ document.addEventListener('DOMContentLoaded', () => {
         await currentTransStageRenderTask.promise;
         currentTransStageRenderTask = null;
       }
+
+      stageContainer.classList.remove('is-unloaded');
 
       let overlayLayer = stageContainer.querySelector('.trans-overlay-layer');
       if (!overlayLayer) {
@@ -1166,9 +1256,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       renderedPages.set(pageNum, { isRendering: false, isRendered: true, canvas: canvas });
 
-      // 若恰好是当前活动阅读页，同步刷新右侧舞台底图
-      if (pageNum === currentPage && translationPane && !translationPane.classList.contains('hidden')) {
-        renderTransStageForPage(currentPage);
+      // 若右侧处于显示态且该页已翻译或恰好是活动页，同步渲染右侧对称页
+      if (translationPane && !translationPane.classList.contains('hidden')) {
+        if (pageTranslations.has(pageNum) || pageNum === currentPage) {
+          renderTransStageForPage(pageNum);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -1176,7 +1268,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 移出视口卸载回收内存 (仅回收左侧原文离屏页面，右侧舞台完全隔离保护)
+  // 移出视口卸载回收显存 (保持双栏对称轻量)
   function unmountPage(pageNum) {
     if (pageNum === currentPage) return;
 
@@ -1191,6 +1283,21 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       pageContainer.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${pageNum} 页 原文</span></div>`;
       pageContainer.classList.add('is-unloaded');
+    }
+
+    // 右侧译文槽位离屏卸载重型 Canvas 回收 GPU 显存（译文数据结构保留在内存中，重返视口 0 延迟复原）
+    if (viewerContainerTrans && pageNum !== currentPage) {
+      const transContainer = viewerContainerTrans.querySelector(`.page-container[data-page-num="${pageNum}"]`);
+      if (transContainer && !transContainer.classList.contains('is-unloaded')) {
+        const transCanvas = transContainer.querySelector('canvas');
+        if (transCanvas) {
+          transCanvas.width = 0;
+          transCanvas.height = 0;
+        }
+        const hasTrans = pageTranslations.has(pageNum);
+        transContainer.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${pageNum} 页 译文${hasTrans ? ' (已就绪)' : ''}</span></div>`;
+        transContainer.classList.add('is-unloaded');
+      }
     }
 
     renderedPages.delete(pageNum);
@@ -1210,6 +1317,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const originalBg = overlayBlock.style.background;
       overlayBlock.style.background = '#d1fadf';
       setTimeout(() => { overlayBlock.style.background = originalBg; }, 1000);
+      showToast('✓ 译文已复制到剪贴板');
     });
     overlayBlock.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1217,11 +1325,11 @@ document.addEventListener('DOMContentLoaded', () => {
       overlayBlock.classList.add('highlight-linked');
 
       const pageContainerLeft = viewerContainer.querySelector(`.page-container[data-page-num="${pageNum}"]`);
-      if (pageContainerLeft && pdfPane) {
+      if (pageContainerLeft && viewerMain) {
         const targetTop = (pageHeight - block.box.y - block.box.h) * scale;
         const containerTop = pageContainerLeft.offsetTop;
-        const targetScrollY = containerTop + targetTop - (pdfPane.clientHeight / 2) + 40;
-        pdfPane.scrollTo({ top: Math.max(0, targetScrollY), behavior: 'smooth' });
+        const targetScrollY = containerTop + targetTop - (viewerMain.clientHeight / 2) + 40;
+        viewerMain.scrollTo({ top: Math.max(0, targetScrollY), behavior: 'smooth' });
 
         let focusBox = pageContainerLeft.querySelector(`.focus-linked-box[data-block-id="${block.id}"]`);
         if (!focusBox) {
@@ -1650,11 +1758,22 @@ document.addEventListener('DOMContentLoaded', () => {
       p.classList.add('is-unloaded');
     });
 
+    if (viewerContainerTrans) {
+      const transPages = viewerContainerTrans.querySelectorAll('.page-container');
+      transPages.forEach(p => {
+        p.style.width = `${defaultW}px`;
+        p.style.height = `${defaultH}px`;
+        p.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${p.dataset.pageNum} 页 译文</span></div>`;
+        p.classList.add('is-unloaded');
+      });
+    }
+
     setupVirtualObserver(renderId);
 
     const targetPageElement = viewerContainer.querySelector(`.page-container[data-page-num="${lastPage}"]`);
-    if (targetPageElement) {
-      targetPageElement.scrollIntoView();
+    if (targetPageElement && viewerMain) {
+      const targetOffsetTop = targetPageElement.offsetTop;
+      viewerMain.scrollTo({ top: Math.max(0, targetOffsetTop - 16) });
     }
 
     if (translationPane && !translationPane.classList.contains('hidden')) {
@@ -2178,7 +2297,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // 5. 方案 2 落地：整页结构化单次批量请求 (Batch Context Translation)
     try {
       const payload = tasksToTranslate.map(t => ({ id: t.block.id, text: t.textToTranslate }));
-      const transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel);
+      let transResults;
+      try {
+        transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel);
+      } catch (firstErr) {
+        console.warn(`第 ${targetPageNum} 页批量翻译遇阻，正在退避重试:`, firstErr.message);
+        if (isBatch) showToast(`通道繁忙，第 ${targetPageNum} 页启动退避重试...`);
+        await new Promise(r => setTimeout(r, 1200));
+        transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel);
+      }
 
       if (activeTranslateController && activeTranslateController.aborted) return;
 
@@ -2208,6 +2335,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
       pageTranslations.set(targetPageNum, blocks);
       transActiveBadge.textContent = isBatch ? '全文翻译中...' : `已翻译 (第 ${targetPageNum} 页)`;
+      updateThumbnailStatus(targetPageNum);
+      if (!isBatch) {
+        showToast(`✓ 第 ${targetPageNum} 页翻译完成`);
+      }
+
+      // 超长篇批量翻译优化：若当前页不在视口内，立即释放重型 Canvas 显存，保留轻量骨架与已就绪状态
+      if (isBatch && targetPageNum !== currentPage) {
+        const stageElem = document.getElementById(`page-trans-container-${targetPageNum}`);
+        if (stageElem) {
+          const rect = stageElem.getBoundingClientRect();
+          const isVisible = (rect.bottom >= -200 && rect.top <= window.innerHeight + 200);
+          if (!isVisible) {
+            const c = stageElem.querySelector('canvas');
+            if (c) { c.width = 0; c.height = 0; }
+            stageElem.innerHTML = `<div class="page-skeleton"><span class="page-skeleton-badge">第 ${targetPageNum} 页 译文 (已就绪)</span></div>`;
+            stageElem.classList.add('is-unloaded');
+          }
+        }
+      }
     } catch (err) {
       console.error('批量翻译失败:', err);
       transActiveBadge.textContent = `翻译失败: ${err.message}`;
@@ -2231,6 +2377,7 @@ document.addEventListener('DOMContentLoaded', () => {
     transActiveBadge.textContent = '全文翻译中...';
     if (translateDocBtn) translateDocBtn.disabled = true;
     if (translatePageBtn) translatePageBtn.disabled = true;
+    if (translateRangeBtn) translateRangeBtn.disabled = true;
 
     const totalPages = currentPdf.numPages;
 
@@ -2245,19 +2392,26 @@ document.addEventListener('DOMContentLoaded', () => {
       const cached = pageTranslations.get(p);
       const isAlreadyDone = cached && cached.length > 0 && cached.some(b => b.transText);
       if (isAlreadyDone) {
+        updateThumbnailStatus(p);
         continue;
       }
 
       await translatePage(p, true);
+      updateThumbnailStatus(p);
+
+      // 防限流自适应平滑调度延迟 (350ms 冷却)，保障公共翻译通道不被封禁
+      await new Promise(r => setTimeout(r, 350));
     }
 
     if (activeTranslateController.aborted) {
       transProgressLabel.textContent = '翻译已停止';
       transActiveBadge.textContent = '已停止';
+      showToast('全文翻译已中止');
     } else {
       transProgressFill.style.width = '100%';
       transProgressLabel.textContent = '全文翻译完成！';
       transActiveBadge.textContent = '已完成';
+      showToast('✓ 全文翻译已全部完成');
     }
 
     renderTransStageForPage(currentPage);
@@ -2269,6 +2423,91 @@ document.addEventListener('DOMContentLoaded', () => {
     isTranslatingDoc = false;
     if (translateDocBtn) translateDocBtn.disabled = false;
     if (translatePageBtn) translatePageBtn.disabled = false;
+    if (translateRangeBtn) translateRangeBtn.disabled = false;
+  }
+
+  // 8.5 沉浸式选页范围解析与批量调度器
+  function parsePageRanges(rangeStr, maxPages) {
+    if (!rangeStr || !rangeStr.trim() || !maxPages) return [];
+    const parts = rangeStr.split(/[,，\s]+/);
+    const pagesSet = new Set();
+
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      if (trimmed.includes('-')) {
+        const [startStr, endStr] = trimmed.split('-');
+        const start = parseInt(startStr, 10);
+        const end = parseInt(endStr, 10);
+        if (!isNaN(start) && !isNaN(end)) {
+          const from = Math.max(1, Math.min(start, end));
+          const to = Math.min(maxPages, Math.max(start, end));
+          for (let p = from; p <= to; p++) {
+            pagesSet.add(p);
+          }
+        }
+      } else {
+        const p = parseInt(trimmed, 10);
+        if (!isNaN(p) && p >= 1 && p <= maxPages) {
+          pagesSet.add(p);
+        }
+      }
+    }
+    return Array.from(pagesSet).sort((a, b) => a - b);
+  }
+
+  async function translatePageList(pages) {
+    if (!currentPdf || isTranslatingDoc || !pages || pages.length === 0) return;
+    isTranslatingDoc = true;
+    activeTranslateController = { aborted: false };
+
+    transProgressCard.classList.remove('hidden');
+    transActiveBadge.textContent = '选页翻译中...';
+    if (translateDocBtn) translateDocBtn.disabled = true;
+    if (translatePageBtn) translatePageBtn.disabled = true;
+    if (translateRangeBtn) translateRangeBtn.disabled = true;
+
+    const total = pages.length;
+
+    for (let idx = 0; idx < total; idx++) {
+      if (activeTranslateController.aborted) break;
+      const p = pages[idx];
+      const percent = Math.round((idx / total) * 100);
+      transProgressFill.style.width = `${percent}%`;
+      transProgressLabel.textContent = `正在翻译第 ${p} 页 (${idx + 1}/${total} 页, ${percent}%)...`;
+
+      const cached = pageTranslations.get(p);
+      const isAlreadyDone = cached && cached.length > 0 && cached.some(b => b.transText);
+      if (!isAlreadyDone) {
+        await translatePage(p, true);
+      }
+      updateThumbnailStatus(p);
+
+      // 防限流自适应平滑调度延迟 (350ms 冷却)，保障公共翻译通道不被封禁
+      await new Promise(r => setTimeout(r, 350));
+    }
+
+    if (activeTranslateController.aborted) {
+      transProgressLabel.textContent = '选页翻译已停止';
+      transActiveBadge.textContent = '已停止';
+      showToast('选页翻译已中止');
+    } else {
+      transProgressFill.style.width = '100%';
+      transProgressLabel.textContent = `选页翻译完成 (共 ${total} 页)！`;
+      transActiveBadge.textContent = '已完成';
+      showToast(`✓ 选页翻译完成 (共 ${total} 页)`);
+    }
+
+    renderTransStageForPage(currentPage);
+
+    setTimeout(() => {
+      transProgressCard.classList.add('hidden');
+    }, 2500);
+
+    isTranslatingDoc = false;
+    if (translateDocBtn) translateDocBtn.disabled = false;
+    if (translatePageBtn) translatePageBtn.disabled = false;
+    if (translateRangeBtn) translateRangeBtn.disabled = false;
   }
 
   // 9. 绑定沉浸式翻译双层工具栏与视图模式事件
@@ -2327,7 +2566,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 顶栏沉浸式隐藏与一键浮动唤回
+  // 顶栏沉浸式隐藏与一键浮动唤回 + 回到顶部
+  const topBackBtn = document.getElementById('top-back-btn');
+  if (topBackBtn) {
+    topBackBtn.addEventListener('click', () => {
+      scrollToPage(1);
+    });
+  }
+
   if (hideTopBtn && showTopFloatingBtn) {
     hideTopBtn.addEventListener('click', () => {
       if (viewerHeaderTop) viewerHeaderTop.classList.add('hidden');
@@ -2339,6 +2585,16 @@ document.addEventListener('DOMContentLoaded', () => {
       if (viewerHeaderTop) viewerHeaderTop.classList.remove('hidden');
       if (viewerHeaderSub) viewerHeaderSub.classList.remove('hidden');
       showTopFloatingBtn.classList.add('hidden');
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (viewerHeaderTop && viewerHeaderTop.classList.contains('hidden')) {
+          viewerHeaderTop.classList.remove('hidden');
+          if (viewerHeaderSub) viewerHeaderSub.classList.remove('hidden');
+          showTopFloatingBtn.classList.add('hidden');
+        }
+      }
     });
   }
 
@@ -2451,6 +2707,88 @@ document.addEventListener('DOMContentLoaded', () => {
   if (translateDocBtn) {
     translateDocBtn.addEventListener('click', () => {
       translateFullDocument();
+    });
+  }
+
+  // 选页翻译交互与模态框绑定
+  function updateRangeModalSummary() {
+    if (!rangePagesInput || !rangeCalcStatus || !currentPdf) return;
+    const pages = parsePageRanges(rangePagesInput.value, currentPdf.numPages);
+    if (pages.length === 0) {
+      rangeCalcStatus.textContent = '未匹配到有效页码 (有效范围 1 - ' + currentPdf.numPages + ')';
+      rangeCalcStatus.style.color = '#ef4444';
+    } else {
+      rangeCalcStatus.style.color = '#2563eb';
+      const preview = pages.length > 8 ? pages.slice(0, 8).join(', ') + '...' : pages.join(', ');
+      rangeCalcStatus.textContent = `已选取：${pages.length} 页 (${preview})`;
+    }
+  }
+
+  if (translateRangeBtn && rangeModal) {
+    translateRangeBtn.addEventListener('click', () => {
+      if (!currentPdf) return;
+      rangeModal.classList.remove('hidden');
+      if (rangePagesInput && (!rangePagesInput.value || rangePagesInput.value.trim() === '')) {
+        rangePagesInput.value = `${currentPage}`;
+      }
+      updateRangeModalSummary();
+      if (rangePagesInput) rangePagesInput.focus();
+    });
+  }
+
+  if (closeRangeModalBtn && rangeModal) {
+    closeRangeModalBtn.addEventListener('click', () => {
+      rangeModal.classList.add('hidden');
+    });
+  }
+
+  if (cancelRangeBtn && rangeModal) {
+    cancelRangeBtn.addEventListener('click', () => {
+      rangeModal.classList.add('hidden');
+    });
+  }
+
+  if (rangePagesInput) {
+    rangePagesInput.addEventListener('input', () => {
+      updateRangeModalSummary();
+    });
+    rangePagesInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (startRangeBtn) startRangeBtn.click();
+      }
+    });
+  }
+
+  // 绑定预设按钮
+  const presetBtns = document.querySelectorAll('.range-preset-btn');
+  presetBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!currentPdf || !rangePagesInput) return;
+      const preset = btn.dataset.preset;
+      const total = currentPdf.numPages;
+      if (preset === 'current') {
+        rangePagesInput.value = `${currentPage}`;
+      } else if (preset === '1-3') {
+        rangePagesInput.value = `1-${Math.min(3, total)}`;
+      } else if (preset === '1-10') {
+        rangePagesInput.value = `1-${Math.min(10, total)}`;
+      } else if (preset === 'all') {
+        rangePagesInput.value = `1-${total}`;
+      }
+      updateRangeModalSummary();
+    });
+  });
+
+  if (startRangeBtn && rangeModal) {
+    startRangeBtn.addEventListener('click', () => {
+      if (!currentPdf || !rangePagesInput) return;
+      const pages = parsePageRanges(rangePagesInput.value, currentPdf.numPages);
+      if (pages.length === 0) {
+        showToast('请输入有效的页码范围');
+        return;
+      }
+      rangeModal.classList.add('hidden');
+      translatePageList(pages);
     });
   }
 

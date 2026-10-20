@@ -126,6 +126,12 @@
           <span>翻译当前页</span>
         </button>
 
+        <!-- 选页范围翻译按钮 (沉浸式翻译同款高效精读) -->
+        <button id="translate-range-btn" class="sub-tool-btn with-text primary-action" disabled title="自定义指定页码范围批量翻译 (如 1-5, 8, 10-15)">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span>选页翻译</span>
+        </button>
+
         <span id="trans-active-badge" class="trans-status-pill">未翻译</span>
 
         <button id="help-btn" class="sub-tool-btn with-text" title="帮助说明与快捷键">
@@ -138,16 +144,23 @@
           <span>Setup</span>
         </button>
 
-        <button id="hide-top-btn" class="sub-tool-btn with-text" title="隐藏顶栏进行全屏沉浸式阅读">
+        <!-- 回到首页顶部按钮 -->
+        <button id="top-back-btn" class="sub-tool-btn with-text" title="回到第一页 (首页)">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
-          <span>Hide top</span>
+          <span>回到顶部</span>
+        </button>
+
+        <!-- 全屏沉浸模式按钮 -->
+        <button id="hide-top-btn" class="sub-tool-btn with-text" title="全屏沉浸阅读 (按 Esc 键随时退出)">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+          <span>全屏</span>
         </button>
       </div>
     </nav>
 
     <!-- 顶栏隐藏后浮现的唤回按钮 -->
-    <button id="show-top-floating-btn" class="show-top-floating-btn hidden" title="展开顶部控制栏">
-      <span>▼ 展开控制栏</span>
+    <button id="show-top-floating-btn" class="show-top-floating-btn hidden" title="展开顶部控制栏 (也可按 Esc 退出全屏)">
+      <span>▼ 退出全屏 / 显示控制栏 (Esc)</span>
     </button>
 
     <!-- Body Area: Left Thumbnail Sidebar + Main Dual Workspace -->
@@ -249,6 +262,48 @@
         </div>
       </main>
     </div>
+
+    <!-- Range Translation Modal (选页范围翻译模态框：沉浸式翻译同款高效精读) -->
+    <div id="range-modal" class="advanced-modal-overlay hidden">
+      <div class="advanced-modal-box range-modal-box">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#2563EB" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            <h3>选页排版翻译 · 按需精读</h3>
+          </div>
+          <button id="close-range-modal-btn" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="range-modal-tip">学术论文与长篇研报无需全量翻译。输入想要精读的页码范围（如 <code>1-5</code> 或 <code>1, 3, 5-8</code>）。系统内置 350ms 防限流平稳调度与离屏显存回收机制，保障流畅并发：</p>
+          
+          <div class="range-input-container">
+            <label for="range-pages-input" class="range-input-label">指定页码：</label>
+            <input type="text" id="range-pages-input" class="range-text-field" placeholder="例如: 1-5, 8, 12-16" value="1-5">
+          </div>
+
+          <div class="range-preset-group">
+            <span class="range-preset-title">快捷预设：</span>
+            <button type="button" class="range-preset-btn" data-preset="current">当前可见页</button>
+            <button type="button" class="range-preset-btn" data-preset="1-3">前 3 页 (摘要与导言)</button>
+            <button type="button" class="range-preset-btn" data-preset="1-10">前 10 页</button>
+            <button type="button" class="range-preset-btn" data-preset="all">全部文档</button>
+          </div>
+
+          <div class="range-info-banner">
+            <span id="range-calc-status">已选取：1 至 5 页 (共 5 页)</span>
+          </div>
+
+          <div class="modal-actions-row">
+            <button id="cancel-range-btn" class="modal-action-btn">取消</button>
+            <button id="start-range-btn" class="modal-action-btn primary">开始选页翻译</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 极简全局轻量 Toast 提示框 (用于复制、快捷键、翻译完成通知) -->
+    <div id="pdf-toast" class="pdf-toast hidden"></div>
 
     <!-- Advanced Translation Modal (高级翻译与遮罩设置抽屉) -->
     <div id="advanced-modal" class="advanced-modal-overlay hidden">
