@@ -34,6 +34,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const skipFormulasCheckbox = document.getElementById('skip-formulas');
   const personaSelect = document.getElementById('persona-select');
   const advPersonaSelect = document.getElementById('adv-persona-select');
+  const advEditPromptBtn = document.getElementById('adv-edit-prompt-btn');
+  const personaPromptModal = document.getElementById('persona-prompt-modal');
+  const closePromptModalBtn = document.getElementById('close-prompt-modal-btn');
+  const promptModalTitle = document.getElementById('prompt-modal-title');
+  const personaPromptTextarea = document.getElementById('persona-prompt-textarea');
+  const btnRestorePrompt = document.getElementById('btn-restore-prompt');
+  const btnCancelPrompt = document.getElementById('btn-cancel-prompt');
+  const btnSavePrompt = document.getElementById('btn-save-prompt');
   const topBackBtn = document.getElementById('top-back-btn');
   let currentPersona = 'biochem'; // 默认角色: 生化学术专家
   const translatePageBtn = document.getElementById('translate-page-btn');
@@ -80,6 +88,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const inkPreviewCanvas = document.getElementById('ink-preview-canvas');
   const inkWidthSlider = document.getElementById('ink-width-slider');
   const inkWidthBadge = document.getElementById('ink-width-badge');
+  const inkOpacitySection = document.getElementById('ink-opacity-section');
+  const inkOpacitySlider = document.getElementById('ink-opacity-slider');
+  const inkOpacityBadge = document.getElementById('ink-opacity-badge');
 
   let currentTool = 'text'; // 'text' | 'pen' | 'highlighter' | 'eraser'
   let isTextMode = true; // 默认开启文本划词选择模式
@@ -88,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentPenWidth = 3;
   let currentHighlighterColor = '#FFF176'; // Edge 经典荧光黄
   let currentHighlighterWidth = 16;
+  let currentHighlighterOpacity = 0.35; // 默认 35% 透明度 (精细控制高光深浅且不遮挡文本)
   let activePopoverTool = null; // 'pen' | 'highlighter' | null
 
   // Edge 官方经典调色板 (30 色画笔矩阵 + 5 色荧光高亮)
@@ -151,6 +163,457 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnPrintPdf = document.getElementById('btn-print-pdf');
   const btnDownloadTxt = document.getElementById('btn-download-txt');
 
+  // 显式保存笔记、下拉选项与草稿恢复 DOM 控件
+  const saveDocBtn = document.getElementById('save-doc-btn');
+  const saveArrowBtn = document.getElementById('save-arrow-btn');
+  const saveDropdownMenu = document.getElementById('save-dropdown-menu');
+  const menuSaveLocal = document.getElementById('menu-save-local');
+  const menuExportPdf = document.getElementById('menu-export-pdf');
+  const menuExportBilingual = document.getElementById('menu-export-bilingual');
+  const menuExportTxt = document.getElementById('menu-export-txt');
+  const drawSaveBtn = document.getElementById('draw-save-btn');
+  const unsavedDot = document.getElementById('unsaved-dot');
+  const unsavedNotesModal = document.getElementById('unsaved-notes-modal');
+  const unsavedModalDesc = document.getElementById('unsaved-modal-desc');
+  const closeUnsavedModalBtn = document.getElementById('close-unsaved-modal-btn');
+  const btnUnsavedCancel = document.getElementById('btn-unsaved-cancel');
+  const btnUnsavedDiscard = document.getElementById('btn-unsaved-discard');
+  const btnUnsavedSave = document.getElementById('btn-unsaved-save');
+
+  // 草稿快照横幅控件
+  const draftRecoveryBanner = document.getElementById('draft-recovery-banner');
+  const draftBannerDesc = document.getElementById('draft-banner-desc');
+  const btnDraftDiscard = document.getElementById('btn-draft-discard');
+  const btnDraftRestore = document.getElementById('btn-draft-restore');
+
+  // 导出带批注 PDF 范围选择模态框控件
+  const exportPdfModal = document.getElementById('export-pdf-modal');
+  const closeExportPdfModalBtn = document.getElementById('close-export-pdf-modal-btn');
+  const btnExportPdfCancel = document.getElementById('btn-export-pdf-cancel');
+  const btnExportPdfConfirm = document.getElementById('btn-export-pdf-confirm');
+  const exportPdfCurrentDesc = document.getElementById('export-pdf-current-desc');
+  const exportPdfAnnotatedDesc = document.getElementById('export-pdf-annotated-desc');
+  const exportPdfAllDesc = document.getElementById('export-pdf-all-desc');
+  const exportPdfCustomInput = document.getElementById('export-pdf-custom-input');
+  const exportPdfSummary = document.getElementById('export-pdf-summary');
+  const labelExportAnnotated = document.getElementById('label-export-annotated');
+  const menuExportPdfDesc = document.getElementById('menu-export-pdf-desc');
+
+  // --- PDF 编辑、自动草稿快照与笔记保存状态机 ---
+  let hasUnsavedNotes = false;
+  let pendingFileToOpen = null;
+  let autoDraftTimer = null;
+  let autoDraftFirstDirtyTime = 0; // 首次产生未存变动时间戳 (用于 15s MaxWait 强制保底)
+  let activeDraftData = null; // 暂存探测到的待恢复草稿
+  const AUTO_DRAFT_DEBOUNCE_MS = 4000;
+  const AUTO_DRAFT_MAX_WAIT_MS = 15000;
+
+  function markNotesDirty() {
+    if (!currentDocId) return;
+    hasUnsavedNotes = true;
+    updateSaveButtonState();
+    scheduleAutoDraft();
+  }
+
+  function markNotesSaved() {
+    hasUnsavedNotes = false;
+    autoDraftFirstDirtyTime = 0;
+    if (autoDraftTimer) {
+      clearTimeout(autoDraftTimer);
+      autoDraftTimer = null;
+    }
+    updateSaveButtonState();
+  }
+
+  // 4 秒空闲防抖 + 15 秒 MaxWait 强制保底静默自动草稿快照 (崩溃恢复与断电容灾)
+  function scheduleAutoDraft() {
+    if (!currentDocId || !hasUnsavedNotes) return;
+    const now = Date.now();
+    if (!autoDraftFirstDirtyTime) {
+      autoDraftFirstDirtyTime = now;
+    }
+
+    if (autoDraftTimer) clearTimeout(autoDraftTimer);
+
+    // 若连续绘制且距首次脏标记已达到 15 秒强制保底阈值，立即执行快照落盘
+    if (now - autoDraftFirstDirtyTime >= AUTO_DRAFT_MAX_WAIT_MS) {
+      performAutoDraft();
+      autoDraftFirstDirtyTime = Date.now();
+      return;
+    }
+
+    autoDraftTimer = setTimeout(() => {
+      performAutoDraft();
+      autoDraftFirstDirtyTime = 0;
+    }, AUTO_DRAFT_DEBOUNCE_MS);
+  }
+
+  async function performAutoDraft() {
+    if (!currentDocId || !hasUnsavedNotes) return;
+    try {
+      await DocStorage.saveDraft(currentDocId, pageDrawings, {
+        title: pdfFileName,
+        numPages: currentPdf ? currentPdf.numPages : 0
+      });
+      console.log('[Auto-Draft] 自动草稿快照已静默持久化');
+    } catch (e) {
+      console.warn('静默草稿快照写入失败:', e);
+    }
+  }
+
+  function getAnnotatedPages() {
+    const list = [];
+    if (pageDrawings) {
+      pageDrawings.forEach((strokes, p) => {
+        if (strokes && strokes.length > 0) list.push(p);
+      });
+    }
+    return list.sort((a, b) => a - b);
+  }
+
+  function updateSaveButtonState() {
+    if (saveDocBtn) {
+      saveDocBtn.disabled = !currentPdf;
+      if (hasUnsavedNotes) {
+        saveDocBtn.classList.add('is-dirty');
+        if (unsavedDot) unsavedDot.classList.remove('hidden');
+      } else {
+        saveDocBtn.classList.remove('is-dirty');
+        if (unsavedDot) unsavedDot.classList.add('hidden');
+      }
+    }
+    if (saveArrowBtn) {
+      saveArrowBtn.disabled = !currentPdf;
+    }
+    if (drawSaveBtn) {
+      if (hasUnsavedNotes) {
+        drawSaveBtn.classList.add('primary-action');
+      } else {
+        drawSaveBtn.classList.remove('primary-action');
+      }
+    }
+    if (menuExportPdfDesc && pageDrawings) {
+      const count = getAnnotatedPages().length;
+      menuExportPdfDesc.textContent = count > 0
+        ? `包含手绘笔迹、高光与原文 (当前已批注 ${count} 页)`
+        : '包含手绘笔迹、高光与原文，支持自选范围';
+    }
+  }
+
+  async function saveCurrentNotes() {
+    if (!currentDocId) {
+      showToast('未打开任何文档，无需保存');
+      return;
+    }
+    try {
+      await DocStorage.saveAllDrawings(currentDocId, pageDrawings, {
+        title: pdfFileName,
+        numPages: currentPdf ? currentPdf.numPages : 0
+      });
+      // 显式保存成功后，清除临时草稿快照
+      await DocStorage.clearDraft(currentDocId);
+      markNotesSaved();
+      showToast('✅ 笔记与手绘批注已保存至本地数据库');
+    } catch (err) {
+      console.error('保存笔记失败:', err);
+      showToast('❌ 保存笔记失败: ' + err.message);
+    }
+  }
+
+  // --- 导出带批注 PDF：范围选择与合成引擎 ---
+  function openExportPdfModal() {
+    if (!exportPdfModal || !currentPdf) return;
+    const numPages = currentPdf.numPages;
+    const annotatedPages = getAnnotatedPages();
+
+    if (exportPdfCurrentDesc) exportPdfCurrentDesc.textContent = `(第 ${currentPage} 页)`;
+    if (exportPdfAllDesc) exportPdfAllDesc.textContent = `(共 ${numPages} 页)`;
+
+    const annotatedRadio = labelExportAnnotated ? labelExportAnnotated.querySelector('input[type="radio"]') : null;
+    if (annotatedPages.length > 0) {
+      if (exportPdfAnnotatedDesc) {
+        const preview = annotatedPages.length > 6 ? annotatedPages.slice(0, 6).join(', ') + '...' : annotatedPages.join(', ');
+        exportPdfAnnotatedDesc.textContent = `(共 ${annotatedPages.length} 页: 第 ${preview} 页)`;
+        exportPdfAnnotatedDesc.style.color = '#059669';
+      }
+      if (annotatedRadio) annotatedRadio.disabled = false;
+      if (labelExportAnnotated) labelExportAnnotated.classList.remove('disabled');
+    } else {
+      if (exportPdfAnnotatedDesc) {
+        exportPdfAnnotatedDesc.textContent = '(当前文献暂无手绘批注)';
+        exportPdfAnnotatedDesc.style.color = '#94a3b8';
+      }
+      if (annotatedRadio) annotatedRadio.disabled = true;
+      if (labelExportAnnotated) labelExportAnnotated.classList.add('disabled');
+    }
+
+    // 默认智能优选：若当前页有批注选当前页，否则若有批注选批注页，否则选全部
+    const currentHasDrawings = (pageDrawings.get(currentPage) || []).length > 0;
+    const radios = exportPdfModal.querySelectorAll('input[name="export-pdf-range"]');
+    if (currentHasDrawings) {
+      radios.forEach(r => r.checked = (r.value === 'current'));
+    } else if (annotatedPages.length > 0) {
+      radios.forEach(r => r.checked = (r.value === 'annotated'));
+    } else {
+      radios.forEach(r => r.checked = (r.value === 'all'));
+    }
+
+    updateExportPdfSummary();
+    exportPdfModal.classList.remove('hidden');
+  }
+
+  function closeExportPdfModal() {
+    if (exportPdfModal) exportPdfModal.classList.add('hidden');
+  }
+
+  function getExportPdfSelectedPages() {
+    if (!currentPdf) return [];
+    const checkedRadio = exportPdfModal.querySelector('input[name="export-pdf-range"]:checked');
+    const val = checkedRadio ? checkedRadio.value : 'current';
+    if (val === 'current') {
+      return [currentPage];
+    } else if (val === 'annotated') {
+      return getAnnotatedPages();
+    } else if (val === 'all') {
+      const arr = [];
+      for (let p = 1; p <= currentPdf.numPages; p++) arr.push(p);
+      return arr;
+    } else if (val === 'custom') {
+      const inputVal = exportPdfCustomInput ? exportPdfCustomInput.value : '';
+      return parsePageRanges(inputVal, currentPdf.numPages);
+    }
+    return [currentPage];
+  }
+
+  function updateExportPdfSummary() {
+    if (!exportPdfSummary || !currentPdf) return;
+    const pages = getExportPdfSelectedPages();
+    const checkedRadio = exportPdfModal.querySelector('input[name="export-pdf-range"]:checked');
+    const val = checkedRadio ? checkedRadio.value : 'current';
+
+    if (val === 'custom' && pages.length === 0) {
+      exportPdfSummary.textContent = '⚠️ 请输入有效的页码范围 (例如 1-5, 8)';
+      exportPdfSummary.style.color = '#ef4444';
+      exportPdfSummary.style.background = '#fef2f2';
+      return;
+    }
+
+    if (val === 'annotated' && pages.length === 0) {
+      exportPdfSummary.textContent = '⚠️ 当前文献尚无手绘批注页面';
+      exportPdfSummary.style.color = '#ef4444';
+      exportPdfSummary.style.background = '#fef2f2';
+      return;
+    }
+
+    exportPdfSummary.style.color = '#2563eb';
+    exportPdfSummary.style.background = '#eff6ff';
+    if (pages.length > 30) {
+      exportPdfSummary.textContent = `预计合成 ${pages.length} 页（页数较多，合成需稍候数秒，请耐心等待）`;
+    } else {
+      exportPdfSummary.textContent = `预计合成并导出 ${pages.length} 页 (${pages.length > 8 ? pages.slice(0, 8).join(', ') + '...' : pages.join(', ')})`;
+    }
+  }
+
+  // 另存为 / 打印带手绘批注的高清 PDF 文档
+  async function printPdfWithAnnotations(targetPages = null) {
+    if (!currentPdf) {
+      showToast('请先打开 PDF 文档');
+      return;
+    }
+
+    // 若未指定具体页码列表且文档超过 1 页，弹出范围选择模态框
+    if (!targetPages || !Array.isArray(targetPages) || targetPages.length === 0) {
+      if (currentPdf.numPages > 1) {
+        openExportPdfModal();
+        return;
+      }
+      targetPages = [1];
+    }
+
+    loadingOverlay.classList.remove('hidden');
+    loadingStatus.textContent = '正在准备合成批注图层...';
+
+    try {
+      const pageImages = [];
+      const totalSelected = targetPages.length;
+
+      for (let i = 0; i < totalSelected; i++) {
+        const p = targetPages[i];
+        loadingStatus.textContent = `正在渲染第 ${i + 1}/${totalSelected} 页 (原文档第 ${p} 页)...`;
+        const page = await currentPdf.getPage(p);
+        const viewport = page.getViewport({ scale: 1.5 }); // 1.5x 高清采样
+
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = viewport.width;
+        offCanvas.height = viewport.height;
+        const offCtx = offCanvas.getContext('2d');
+
+        // 1. 渲染原始 PDF 页面
+        await page.render({
+          canvasContext: offCtx,
+          viewport: viewport
+        }).promise;
+
+        // 2. 覆盖手绘笔迹与批注 (若该页有批注)
+        const strokes = pageDrawings.get(p);
+        if (strokes && strokes.length > 0) {
+          strokes.forEach(stroke => {
+            if (!stroke.points || stroke.points.length === 0) return;
+            const isHighlighter = stroke.tool === 'highlighter';
+            offCtx.save();
+            if (isHighlighter) {
+              offCtx.globalCompositeOperation = 'multiply';
+            }
+            offCtx.strokeStyle = stroke.color || (isHighlighter ? '#FFF176' : '#0078D4');
+            offCtx.globalAlpha = isHighlighter ? (stroke.opacity !== undefined ? stroke.opacity : currentHighlighterOpacity) : 1.0;
+            offCtx.lineWidth = (stroke.baseWidth || (isHighlighter ? 16 : 3)) * 1.5;
+            offCtx.lineCap = isHighlighter ? 'square' : 'round';
+            offCtx.lineJoin = 'round';
+            offCtx.beginPath();
+            stroke.points.forEach((pt, idx) => {
+              const x = (pt.nx !== undefined ? pt.nx : pt.x / (offCanvas.width / 1.5)) * offCanvas.width;
+              const y = (pt.ny !== undefined ? pt.ny : pt.y / (offCanvas.height / 1.5)) * offCanvas.height;
+              if (idx === 0) offCtx.moveTo(x, y);
+              else offCtx.lineTo(x, y);
+            });
+            offCtx.stroke();
+            offCtx.restore();
+          });
+        }
+
+        pageImages.push({
+          pageNumber: p,
+          width: viewport.width,
+          height: viewport.height,
+          dataUrl: offCanvas.toDataURL('image/jpeg', 0.92)
+        });
+      }
+
+      loadingOverlay.classList.add('hidden');
+
+      // 调起打印窗口 (系统自带“另存为 PDF”)
+      const printWin = window.open('', '_blank');
+      if (!printWin) {
+        showToast('⚠️ 打印弹窗被浏览器拦截，请允许弹出式窗口后重试');
+        return;
+      }
+
+      const imgTags = pageImages.map(img => `
+        <div class="print-page">
+          <img src="${img.dataUrl}" alt="Page ${img.pageNumber}" />
+        </div>
+      `).join('');
+
+      printWin.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(pdfFileName || 'PDF 文档')} - 带批注文档</title>
+  <style>
+    @page {
+      margin: 0;
+      size: auto;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #525659;
+    }
+    .print-toolbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: #1e293b;
+      color: #fff;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 999;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .print-btn {
+      background: #059669;
+      color: #fff;
+      border: none;
+      padding: 7px 18px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .print-btn:hover { background: #047857; }
+    .pages-container {
+      margin-top: 55px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 20px;
+    }
+    .print-page {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      background: #fff;
+      max-width: 900px;
+      width: 100%;
+      page-break-after: always;
+    }
+    .print-page img {
+      width: 100%;
+      display: block;
+    }
+    @media print {
+      body { background: transparent; }
+      .print-toolbar { display: none !important; }
+      .pages-container { margin-top: 0; padding: 0; gap: 0; }
+      .print-page { box-shadow: none; max-width: none; width: 100%; page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <span>${escapeHtml(pdfFileName || 'PDF 文档')} · 共 ${pageImages.length} 页（已合成手绘与高光批注）</span>
+    <button class="print-btn" onclick="window.print()">🖨️ 打印 / 另存为 PDF</button>
+  </div>
+  <div class="pages-container">
+    ${imgTags}
+  </div>
+</body>
+</html>`);
+      printWin.document.close();
+      printWin.focus();
+      setTimeout(() => {
+        printWin.print();
+      }, 500);
+    } catch (err) {
+      loadingOverlay.classList.add('hidden');
+      console.error('合成带批注 PDF 失败:', err);
+      showToast('❌ 合成带批注 PDF 失败: ' + err.message);
+    }
+  }
+
+  function requestOpenFile(file) {
+    if (!file) return;
+    if (hasUnsavedNotes) {
+      pendingFileToOpen = file;
+      if (unsavedModalDesc) {
+        unsavedModalDesc.textContent = `当前文档【${pdfFileName || '当前文档'}】有未保存的手绘批注与阅读笔记。打开新文档前，是否需要保存现在的笔记？`;
+      }
+      if (unsavedNotesModal) unsavedNotesModal.classList.remove('hidden');
+      return;
+    }
+    readLocalFile(file);
+  }
+
+  function closeUnsavedModal() {
+    if (unsavedNotesModal) unsavedNotesModal.classList.add('hidden');
+    pendingFileToOpen = null;
+    fileInput.value = '';
+    if (welcomeFileInput) welcomeFileInput.value = '';
+  }
+
   function openDownloadModal() {
     if (!downloadModal || !currentPdf) return;
     const totalPages = currentPdf.numPages;
@@ -171,15 +634,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (downloadModal) downloadModal.classList.add('hidden');
   }
 
+  // 当前目标语言 (同步读取，供译文缓存有效性判定)
+  function getActiveTargetLang() {
+    return (targetLanguageSelect && targetLanguageSelect.value) ? targetLanguageSelect.value : 'zh-CN';
+  }
+
+  // 统一判定某页译文是否“完整有效”：存在译文、无缺失块、且目标语言与当前一致 (旧缓存无 targetLang 字段视为有效)
+  function isPageTranslated(pageNum) {
+    const cached = pageTranslations.get(pageNum);
+    if (!cached || cached.length === 0) return false;
+    if (!cached.some(b => b.transText)) return false;
+    if (cached.some(b => b.untranslated)) return false;
+    const lang = getActiveTargetLang();
+    return !cached.some(b => b.targetLang && b.targetLang !== lang);
+  }
+
   function updateTranslateDocButtonState() {
     if (!translateDocBtn || !currentPdf) return;
     const totalPages = currentPdf.numPages;
     let translatedCount = 0;
     for (let p = 1; p <= totalPages; p++) {
-      const cached = pageTranslations.get(p);
-      if (cached && cached.length > 0 && cached.some(b => b.transText)) {
-        translatedCount++;
-      }
+      if (isPageTranslated(p)) translatedCount++;
     }
 
     if (translatedCount === totalPages && totalPages > 0) {
@@ -200,7 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   let toastTimer = null;
-  function showToast(msg) {
+  function showToast(msg, duration = 2200) {
     const toast = document.getElementById('pdf-toast');
     if (!toast) return;
     toast.textContent = msg;
@@ -208,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
       toast.classList.add('hidden');
-    }, 2200);
+    }, duration);
   }
 
   let currentPdf = null;
@@ -303,18 +778,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const copyResBtn = document.getElementById('pdf-copy-res-btn');
   const dragHandle = document.getElementById('pdf-panel-drag-handle');
 
+  const isHttpHosted = typeof location !== 'undefined' && /^https?:$/.test(location.protocol);
   let currentSelectedText = '';
+  let currentSelectionContext = '';
+  let selectionTranslateSeq = 0;
   let isDragging = false;
   let isPinned = false;
   let dragOffset = { x: 0, y: 0 };
 
-  // AI 模型内置列表 (智谱 GLM 4/4.5/4.7 Flash 官方模型永久免费)
+  // AI 模型内置列表 (智谱 GLM 4/4.5/4.7 Flash 官方模型永久免费，支持 Gemini 与 DeepSeek)
   const AI_MODELS = {
     glm: [
       'glm-4-flash',
       'glm-4.5-flash',
       'glm-4.7-flash',
       'glm-4-flashx'
+    ],
+    gemini: [
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
+    ],
+    deepseek: [
+      'deepseek-chat',
+      'deepseek-reasoner'
     ]
   };
 
@@ -327,12 +814,55 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/\uFB02/g, 'fl')
       .replace(/\uFB03/g, 'ffi')
       .replace(/\uFB04/g, 'ffl')
+      .replace(/\uFB05/g, 'ft')
+      .replace(/\uFB06/g, 'st')
       .replace(/\u00AD/g, '')       // 软连字符
-      .replace(/[\u200B\uFEFF]/g, '') // 零宽字符
+      .replace(/[\u200B-\u200D\uFEFF]/g, '') // 零宽字符
+      .replace(/[\u2010\u2011]/g, '-') // 统一短横线连字符
       .replace(/\u00A0/g, ' ')      // 不换行空格
       .replace(/[\u2018\u2019]/g, "'") // 弯单引号
       .replace(/[\u201C\u201D]/g, '"') // 弯双引号
       .replace(/[ \t]+/g, ' ');     // 压缩多余连续水平空白
+  }
+
+  // 提取划词文本周围的上下文语境 (支持从 .trans-overlay-block、.textLayer 的 span 集合或段落提取)
+  function getSelectionSurroundingContext(selection, maxChars = 250) {
+    if (!selection || selection.rangeCount === 0) return '';
+    try {
+      const range = selection.getRangeAt(0);
+      const container = range.commonAncestorContainer;
+      const el = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+      if (!el) return '';
+
+      // 1. 如果在翻译排版覆盖块内部划词，直接取当前 block 的完整文本作为语境
+      const overlayBlock = el.closest('.trans-overlay-block');
+      if (overlayBlock) {
+        const fullText = (overlayBlock.textContent || '').trim();
+        return reconstructPdfParagraphs(fullText).slice(0, maxChars * 2);
+      }
+
+      // 2. 如果在 PDF.js 的 textLayer 内部划词
+      const textLayer = el.closest('.textLayer');
+      if (textLayer) {
+        const targetSpan = el.closest('span') || el;
+        const spans = Array.from(textLayer.querySelectorAll('span'));
+        const idx = spans.indexOf(targetSpan);
+        if (idx !== -1) {
+          // 提取前后各若干个 span（约 5~8 行）
+          const startIdx = Math.max(0, idx - 4);
+          const endIdx = Math.min(spans.length, idx + 5);
+          const surroundingRaw = spans.slice(startIdx, endIdx).map(s => s.textContent || '').join(' ');
+          return reconstructPdfParagraphs(surroundingRaw).slice(0, maxChars * 2);
+        }
+      }
+
+      // 3. 通用 fallback：如果能找到父容器段落
+      const parentBlock = el.closest('p, div, section, article') || el;
+      const raw = parentBlock.textContent || '';
+      return reconstructPdfParagraphs(raw).slice(0, maxChars * 2);
+    } catch (e) {
+      return '';
+    }
   }
 
   // PDF 文本语义段落重构与断行清洗函数
@@ -504,7 +1034,14 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get({
       glmApiKey: '',
       glmModels: null,
+      geminiApiKey: '',
+      geminiModels: null,
+      geminiActiveModel: 'gemini-2.0-flash',
+      deepseekApiKey: '',
+      deepseekModels: null,
+      deepseekActiveModel: 'deepseek-chat',
       deeplApiKey: '',
+      deeplEndpoint: '',
       youdaoAppKey: '',
       youdaoAppSecret: '',
       pdfTranslateEngine: 'google',
@@ -512,6 +1049,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }, (result) => {
       // 动态载入用户在设置中启用的模型列表
       if (Array.isArray(result.glmModels) && result.glmModels.length > 0) AI_MODELS.glm = result.glmModels;
+      if (Array.isArray(result.geminiModels) && result.geminiModels.length > 0) AI_MODELS.gemini = result.geminiModels;
+      if (Array.isArray(result.deepseekModels) && result.deepseekModels.length > 0) AI_MODELS.deepseek = result.deepseekModels;
 
       const currentPanelVal = panelEngineSelect.value;
       const currentToolbarVal = pdfTranslateEngine ? (pdfTranslateEngine.value || result.pdfTranslateEngine || 'google') : 'google';
@@ -529,6 +1068,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (result.glmApiKey && result.glmApiKey.trim()) {
         available.push({ value: 'glm', label: '智谱 GLM (免费Flash)' });
+      }
+      if (result.geminiApiKey && result.geminiApiKey.trim()) {
+        available.push({ value: 'gemini', label: 'Google Gemini (终身免费)' });
+      }
+      if (result.deepseekApiKey && result.deepseekApiKey.trim()) {
+        available.push({ value: 'deepseek', label: 'DeepSeek 翻译 (深度推理)' });
       }
       if (result.youdaoAppKey && result.youdaoAppSecret && result.youdaoAppKey.trim() && result.youdaoAppSecret.trim()) {
         available.push({ value: 'youdao', label: '有道词典' });
@@ -574,21 +1119,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 更新顶部工具栏中的 AI 模型选择下拉框 (如 GLM 具体模型)
+  // 更新顶部工具栏中的 AI 模型选择下拉框 (如 GLM / Gemini / DeepSeek 等)
   function updateToolbarModelSelect(engine) {
     if (!pdfTranslateModel) return;
     pdfTranslateModel.innerHTML = '';
 
-    if (engine === 'glm') {
-      const models = AI_MODELS.glm || ['glm-4-flash', 'glm-4.5-flash', 'glm-4.7-flash', 'glm-4-flashx'];
+    if (AI_MODELS[engine]) {
+      const models = AI_MODELS[engine];
       models.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m;
         opt.textContent = m;
         pdfTranslateModel.appendChild(opt);
       });
-      chrome.storage.local.get(['glmActiveModel'], (res) => {
-        const activeM = res.glmActiveModel;
+      const storageKey = `${engine}ActiveModel`;
+      chrome.storage.local.get([storageKey], (res) => {
+        const activeM = res[storageKey];
         if (activeM && models.includes(activeM)) {
           pdfTranslateModel.value = activeM;
         } else if (models.length > 0) {
@@ -603,8 +1149,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (pdfTranslateModel) {
     pdfTranslateModel.addEventListener('change', () => {
-      if (pdfTranslateEngine && pdfTranslateEngine.value === 'glm') {
-        chrome.storage.local.set({ glmActiveModel: pdfTranslateModel.value });
+      const engine = pdfTranslateEngine ? pdfTranslateEngine.value : '';
+      if (engine && AI_MODELS[engine]) {
+        chrome.storage.local.set({ [`${engine}ActiveModel`]: pdfTranslateModel.value });
       }
     });
   }
@@ -657,6 +1204,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // 语义重构段落，消除 PDF 硬换行和断字
       const text = reconstructPdfParagraphs(rawText);
       currentSelectedText = text;
+      currentSelectionContext = getSelectionSurroundingContext(selection, 250);
 
       getSettings((settings) => {
         if (settings && settings.enableSelectionTranslate === false) return; // 尊重设置页的划词翻译开关
@@ -681,7 +1229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (settings && settings.autoShowPanel) {
-          showPanel(posX, posY, text, settings.defaultEngine || 'google', settings.defaultTargetLang || 'zh-CN');
+          showPanel(posX, posY, text, settings.defaultEngine || 'google', settings.defaultTargetLang || 'zh-CN', currentSelectionContext);
         } else {
           showIcon(posX, posY);
         }
@@ -718,19 +1266,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 150);
   }
 
-  function showPanel(x, y, text, engine, targetLang) {
+  function showPanel(x, y, text, engine, targetLang, context = '') {
     hideIcon();
     const panelWidth = translatePanel.offsetWidth || 360;
     const panelHeight = translatePanel.offsetHeight || 220;
-    let safeX = Math.max(15, Math.min(x, window.innerWidth - panelWidth - 20));
-    let safeY = y + 8;
-    if (safeY + panelHeight > window.innerHeight - 15) {
-      safeY = Math.max(15, y - panelHeight - 12);
+    let safeX = Math.max(12, Math.min(x, window.innerWidth - panelWidth - 16));
+    let safeY = Math.max(12, Math.min(y + 8, window.innerHeight - panelHeight - 16));
+    if (y + panelHeight + 20 > window.innerHeight && y - panelHeight - 12 >= 10) {
+      safeY = y - panelHeight - 12;
     }
 
     translatePanel.style.left = `${safeX}px`;
     translatePanel.style.top = `${safeY}px`;
     panelSourceText.textContent = text;
+    currentSelectionContext = context || '';
 
     loadAvailableEngines(() => {
       const availableValues = Array.from(panelEngineSelect.options).map(o => o.value);
@@ -742,7 +1291,7 @@ document.addEventListener('DOMContentLoaded', () => {
         translatePanel.classList.remove('hidden');
         translatePanel.getBoundingClientRect();
         translatePanel.classList.add('show');
-        doTranslation(text, chosenEngine, targetLang, activeModel);
+        doTranslation(text, chosenEngine, targetLang, activeModel, currentSelectionContext);
       });
     });
   }
@@ -790,34 +1339,95 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function doTranslation(text, engine, targetLang, modelName) {
+  async function fetchLocalTranslate(text, targetLang, context, persona) {
+    const res = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, targetLang, context, persona })
+    });
+    const data = await res.json();
+    if (data && data.success && data.translation) {
+      return data.translation;
+    }
+    throw new Error(data.error || '本地服务翻译未返回有效结果');
+  }
+
+  function doTranslation(text, engine, targetLang, modelName, context = currentSelectionContext) {
+    const seq = ++selectionTranslateSeq;
     panelLoader.classList.remove('hidden');
     panelResultText.classList.add('hidden');
+    panelResultText.classList.remove('error');
 
-    chrome.runtime.sendMessage({
-      action: 'translate',
-      text: text,
-      engine: engine,
-      targetLang: targetLang,
-      model: modelName
-    }, (response) => {
+    // 超时熔断保护：25 秒内若未响应，自动解除 loading 并提示
+    const timeoutId = setTimeout(() => {
+      if (seq === selectionTranslateSeq && !panelLoader.classList.contains('hidden')) {
+        panelLoader.classList.add('hidden');
+        panelResultText.classList.remove('hidden');
+        panelResultText.textContent = '翻译超时，请检查网络连接或接口配置';
+        panelResultText.classList.add('error');
+      }
+    }, 25000);
+
+    const onTranslateSuccess = (translation) => {
+      clearTimeout(timeoutId);
+      if (seq !== selectionTranslateSeq) return; // 序列号不匹配，丢弃过期竞态响应
       panelLoader.classList.add('hidden');
       panelResultText.classList.remove('hidden');
+      panelResultText.textContent = translation;
+      panelResultText.classList.remove('error');
+    };
 
-      if (!response) {
-        panelResultText.textContent = '翻译超时或服务未响应';
-        panelResultText.classList.add('error');
-        return;
-      }
+    const onTranslateError = (errMsg) => {
+      clearTimeout(timeoutId);
+      if (seq !== selectionTranslateSeq) return;
+      panelLoader.classList.add('hidden');
+      panelResultText.classList.remove('hidden');
+      panelResultText.textContent = `出错: ${errMsg || '未知错误'}`;
+      panelResultText.classList.add('error');
+    };
 
-      if (response.success) {
-        panelResultText.textContent = response.translation;
-        panelResultText.classList.remove('error');
-      } else {
-        panelResultText.textContent = `出错: ${response.error}`;
-        panelResultText.classList.add('error');
-      }
-    });
+    // 优先通过 Chrome 扩展底层通道通信
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({
+        action: 'translate',
+        text: text,
+        engine: engine,
+        targetLang: targetLang,
+        model: modelName,
+        context: context,
+        persona: currentPersona
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          if (isHttpHosted) {
+            // 本地 HTTP 托管模式兜底
+            fetchLocalTranslate(text, targetLang, context, currentPersona)
+              .then(onTranslateSuccess)
+              .catch(e => onTranslateError(e.message));
+          } else {
+            onTranslateError(chrome.runtime.lastError.message);
+          }
+          return;
+        }
+
+        if (!response) {
+          onTranslateError('翻译超时或服务未响应');
+          return;
+        }
+
+        if (response.success) {
+          onTranslateSuccess(response.translation);
+        } else {
+          onTranslateError(response.error);
+        }
+      });
+    } else if (isHttpHosted) {
+      // 本地独立 HTTP 服务模式直接请求后端 API
+      fetchLocalTranslate(text, targetLang, context, currentPersona)
+        .then(onTranslateSuccess)
+        .catch(e => onTranslateError(e.message));
+    } else {
+      onTranslateError('翻译服务通道不可用');
+    }
   }
 
   floatIcon.addEventListener('click', (e) => {
@@ -825,7 +1435,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const x = parseFloat(floatIcon.style.left);
     const y = parseFloat(floatIcon.style.top);
     getSettings((settings) => {
-      showPanel(x, y, currentSelectedText, settings.defaultEngine, settings.defaultTargetLang);
+      showPanel(x, y, currentSelectedText, settings.defaultEngine, settings.defaultTargetLang, currentSelectionContext);
     });
   });
 
@@ -881,6 +1491,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => {
           copyResBtn.style.color = '';
         }, 1500);
+      }).catch(err => {
+        showToast('复制失败: ' + err.message);
       });
     }
   });
@@ -889,7 +1501,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const engine = panelEngineSelect.value;
     updateModelSelect(engine, () => {
       getSettings((settings) => {
-        doTranslation(currentSelectedText, engine, settings.defaultTargetLang, panelModelSelect.value);
+        doTranslation(currentSelectedText, engine, settings.defaultTargetLang, panelModelSelect.value, currentSelectionContext);
       });
     });
   });
@@ -902,11 +1514,11 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.set({ [storageKey]: model });
 
     getSettings((settings) => {
-      doTranslation(currentSelectedText, engine, settings.defaultTargetLang, model);
+      doTranslation(currentSelectedText, engine, settings.defaultTargetLang, model, currentSelectionContext);
     });
   });
 
-  // 弹窗面板拖拽
+  // 弹窗面板拖拽 (修复 fixed 视口坐标偏移与边界吸附限制)
   dragHandle.addEventListener('mousedown', (e) => {
     if (e.target.closest('.panel-actions')) return;
     isDragging = true;
@@ -919,10 +1531,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
-    const posX = e.clientX - dragOffset.x + window.scrollX;
-    const posY = e.clientY - dragOffset.y + window.scrollY;
-    translatePanel.style.left = `${posX}px`;
-    translatePanel.style.top = `${posY}px`;
+    const panelWidth = translatePanel.offsetWidth || 360;
+    const panelHeight = translatePanel.offsetHeight || 220;
+    const rawX = e.clientX - dragOffset.x;
+    const rawY = e.clientY - dragOffset.y;
+    const safeX = Math.max(8, Math.min(rawX, window.innerWidth - panelWidth - 8));
+    const safeY = Math.max(8, Math.min(rawY, window.innerHeight - panelHeight - 8));
+    translatePanel.style.left = `${safeX}px`;
+    translatePanel.style.top = `${safeY}px`;
   });
 
   document.addEventListener('mouseup', () => {
@@ -973,7 +1589,7 @@ document.addEventListener('DOMContentLoaded', () => {
     viewerMain.style.background = '';
     const file = e.dataTransfer.files[0];
     if (file && file.type === 'application/pdf') {
-      readLocalFile(file);
+      requestOpenFile(file);
     }
   });
 
@@ -981,7 +1597,7 @@ document.addEventListener('DOMContentLoaded', () => {
   fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
-      readLocalFile(file);
+      requestOpenFile(file);
     }
   });
 
@@ -989,7 +1605,7 @@ document.addEventListener('DOMContentLoaded', () => {
     welcomeFileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (file) {
-        readLocalFile(file);
+        requestOpenFile(file);
       }
     });
   }
@@ -1035,6 +1651,9 @@ document.addEventListener('DOMContentLoaded', () => {
     pageDrawings.clear();
     pageTextIndexCache.clear();
     resetSearchState();
+    markNotesSaved();
+    if (draftRecoveryBanner) draftRecoveryBanner.classList.add('hidden');
+    activeDraftData = null;
 
     const renderId = ++currentRenderId;
 
@@ -1051,7 +1670,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       // 异步读取本地历史持久化缓存 (批注与译文)，刷新页面后 0 延迟秒级自动还原
-      DocStorage.loadDocCache(currentDocId).then((cached) => {
+      DocStorage.loadDocCache(currentDocId).then(async (cached) => {
         let restoredCount = 0;
         if (cached.translations && cached.translations.size > 0) {
           cached.translations.forEach((blocks, p) => {
@@ -1075,6 +1694,25 @@ document.addEventListener('DOMContentLoaded', () => {
           showToast(`已从本地自动恢复历史记录 (${cached.translations.size} 页译文，${cached.drawings.size} 页批注)`);
         }
         updateTranslateDocButtonState();
+        markNotesSaved();
+
+        // 探测未正常持久化的崩溃 / 断电草稿快照
+        try {
+          const draft = await DocStorage.loadDraft(currentDocId);
+          if (draft && draft.timestamp > (cached.lastSavedAt || 0) && draft.drawings && draft.drawings.size > 0) {
+            activeDraftData = draft;
+            if (draftRecoveryBanner && draftBannerDesc) {
+              const draftTimeStr = new Date(draft.timestamp).toLocaleTimeString();
+              draftBannerDesc.textContent = `检测到该文献在 ${draftTimeStr} 有未正常保存的手绘批注草稿快照（共 ${draft.drawings.size} 页）。是否立即恢复？`;
+              draftRecoveryBanner.classList.remove('hidden');
+            }
+          } else {
+            if (draftRecoveryBanner) draftRecoveryBanner.classList.add('hidden');
+            activeDraftData = null;
+          }
+        } catch (e) {
+          console.warn('探测草稿快照异常:', e);
+        }
       });
 
       currentPage = 1;
@@ -1086,6 +1724,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (translatePageBtn) translatePageBtn.disabled = false;
       if (translateDocBtn) translateDocBtn.disabled = false;
       if (translateRangeBtn) translateRangeBtn.disabled = false;
+      updateSaveButtonState();
 
       // 提取第 1 页基准比例，预计算所有页面的骨架占位
       const firstPage = await currentPdf.getPage(1);
@@ -1437,6 +2076,37 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- 画笔批注涂鸦引擎 (Annotation Canvas Engine) ---
+  function drawSingleStroke(ctx, stroke, cw, ch) {
+    if (!stroke || !stroke.points || stroke.points.length === 0) return;
+    const isHighlighter = (stroke.tool === 'highlighter');
+    ctx.save();
+    ctx.beginPath();
+    if (isHighlighter) {
+      ctx.globalCompositeOperation = 'multiply';
+    }
+    ctx.strokeStyle = stroke.color || (isHighlighter ? '#FFF176' : '#0078D4');
+    ctx.globalAlpha = isHighlighter ? (stroke.opacity !== undefined ? stroke.opacity : currentHighlighterOpacity) : 1.0;
+    ctx.lineWidth = (stroke.baseWidth || (isHighlighter ? 16 : 3)) * (currentScale || 1.0);
+    ctx.lineCap = isHighlighter ? 'square' : 'round';
+    ctx.lineJoin = 'round';
+
+    const firstX = stroke.points[0].nx !== undefined ? stroke.points[0].nx * cw : stroke.points[0].x;
+    const firstY = stroke.points[0].ny !== undefined ? stroke.points[0].ny * ch : stroke.points[0].y;
+    ctx.moveTo(firstX, firstY);
+
+    if (stroke.points.length === 1) {
+      ctx.lineTo(firstX + 0.2, firstY);
+    } else {
+      for (let i = 1; i < stroke.points.length; i++) {
+        const px = stroke.points[i].nx !== undefined ? stroke.points[i].nx * cw : stroke.points[i].x;
+        const py = stroke.points[i].ny !== undefined ? stroke.points[i].ny * ch : stroke.points[i].y;
+        ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function redrawPageAnnotations(pageNum, canvas) {
     const strokes = pageDrawings.get(pageNum);
     if (!strokes || strokes.length === 0) return;
@@ -1444,28 +2114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cw = canvas.width;
     const ch = canvas.height;
     strokes.forEach(stroke => {
-      if (!stroke.points || stroke.points.length === 0) return;
-      ctx.beginPath();
-      const isHighlighter = (stroke.tool === 'highlighter');
-      ctx.strokeStyle = stroke.color || (isHighlighter ? '#FFF176' : '#0078D4');
-      ctx.globalAlpha = isHighlighter ? (stroke.opacity || 0.45) : 1.0;
-      ctx.lineWidth = (stroke.baseWidth || (isHighlighter ? 16 : 3)) * (currentScale || 1.0);
-      ctx.lineCap = isHighlighter ? 'square' : 'round';
-      ctx.lineJoin = 'round';
-      const firstX = stroke.points[0].nx !== undefined ? stroke.points[0].nx * cw : stroke.points[0].x;
-      const firstY = stroke.points[0].ny !== undefined ? stroke.points[0].ny * ch : stroke.points[0].y;
-      ctx.moveTo(firstX, firstY);
-      if (stroke.points.length === 1) {
-        ctx.lineTo(firstX + 0.2, firstY);
-      } else {
-        for (let i = 1; i < stroke.points.length; i++) {
-          const px = stroke.points[i].nx !== undefined ? stroke.points[i].nx * cw : stroke.points[i].x;
-          const py = stroke.points[i].ny !== undefined ? stroke.points[i].ny * ch : stroke.points[i].y;
-          ctx.lineTo(px, py);
-        }
-      }
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
+      drawSingleStroke(ctx, stroke, cw, ch);
     });
   }
 
@@ -1552,21 +2201,13 @@ document.addEventListener('DOMContentLoaded', () => {
         tool: currentTool,
         color: isHighlighter ? currentHighlighterColor : currentPenColor,
         baseWidth: isHighlighter ? currentHighlighterWidth : currentPenWidth,
-        opacity: isHighlighter ? 0.45 : 1.0,
+        opacity: isHighlighter ? currentHighlighterOpacity : 1.0,
         points: [pt]
       };
 
-      ctx.strokeStyle = currentStroke.color;
-      ctx.globalAlpha = currentStroke.opacity;
-      ctx.lineWidth = currentStroke.baseWidth * (currentScale || 1.0);
-      ctx.lineCap = isHighlighter ? 'square' : 'round';
-      ctx.lineJoin = 'round';
-
-      ctx.beginPath();
-      ctx.moveTo(pt.x, pt.y);
-      ctx.lineTo(pt.x + 0.2, pt.y);
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      redrawPageAnnotations(pageNum, canvas);
+      drawSingleStroke(ctx, currentStroke, canvas.width, canvas.height);
     });
 
     canvas.addEventListener('pointermove', (e) => {
@@ -1579,21 +2220,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (!currentStroke) return;
-      const isHighlighter = (currentStroke.tool === 'highlighter');
-      const prev = currentStroke.points[currentStroke.points.length - 1];
       currentStroke.points.push(pt);
 
-      ctx.strokeStyle = currentStroke.color;
-      ctx.globalAlpha = currentStroke.opacity;
-      ctx.lineWidth = currentStroke.baseWidth * (currentScale || 1.0);
-      ctx.lineCap = isHighlighter ? 'square' : 'round';
-      ctx.lineJoin = 'round';
-
-      ctx.beginPath();
-      ctx.moveTo(prev.x, prev.y);
-      ctx.lineTo(pt.x, pt.y);
-      ctx.stroke();
-      ctx.globalAlpha = 1.0;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      redrawPageAnnotations(pageNum, canvas);
+      drawSingleStroke(ctx, currentStroke, canvas.width, canvas.height);
     });
 
     const finishStroke = () => {
@@ -1602,12 +2233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (currentTool === 'eraser') {
         if (eraserModified && currentDocId) {
-          const strokes = pageDrawings.get(pageNum);
-          if (!strokes || strokes.length === 0) {
-            DocStorage.deleteDrawing(currentDocId, pageNum);
-          } else {
-            DocStorage.saveDrawing(currentDocId, pageNum, strokes);
-          }
+          markNotesDirty();
         }
         return;
       }
@@ -1621,9 +2247,9 @@ document.addEventListener('DOMContentLoaded', () => {
           pageDrawings.set(pageNum, []);
         }
         pageDrawings.get(pageNum).push(currentStroke);
-        if (currentDocId) {
-          DocStorage.saveDrawing(currentDocId, pageNum, pageDrawings.get(pageNum));
-        }
+        markNotesDirty();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        redrawPageAnnotations(pageNum, canvas);
       }
       currentStroke = null;
     };
@@ -2749,52 +3375,84 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 6.5 整页 JSON 结构化批量翻译 API (优先走本地学术引擎，无 Node 环境时 0 延迟秒级回退至扩展 Background)
   let localServerReachable = null; // null: 未探测, true: 本地 Node 可用, false: 纯扩展模式直连
+  let localServerRetryAt = 0; // 本地服务不可达后的重新探测时间点 (避免会话内永久降级)
+  const LOCAL_SERVER_TIMEOUT_MS = 90000;
+  const LOCAL_SERVER_REPROBE_MS = 60000;
+
+  // 按用户所选引擎解析本地学术引擎所需凭据；返回 null 表示该引擎不走本地服务 (如 Gemini 非 OpenAI 兼容协议)
+  function resolveLocalEngineCredentials(engine, model, settings) {
+    if (engine && engine.startsWith('custom_')) {
+      const customId = engine.substring(7);
+      const cm = (settings.customModels || []).find(m => m.id === customId);
+      if (!cm) return null;
+      return { apiKey: cm.apiKey || '', endpoint: cm.endpoint, model: model || cm.modelName };
+    }
+    if (engine === 'glm') {
+      return {
+        apiKey: settings.glmApiKey || '',
+        endpoint: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+        model: model || settings.glmActiveModel || 'glm-4-flash'
+      };
+    }
+    if (engine === 'deepseek') {
+      return {
+        apiKey: settings.deepseekApiKey || '',
+        endpoint: 'https://api.deepseek.com/chat/completions',
+        model: model || settings.deepseekActiveModel || 'deepseek-chat'
+      };
+    }
+    if (engine === 'gemini') return null;
+    // 免 Key 公共通道 (google 等)：交由本地引擎混合分流的免费线路
+    return { apiKey: '', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-chat' };
+  }
 
   function requestBatchTranslation(items, engine, targetLang, model, context = null, persona = 'biochem') {
     return new Promise((resolve, reject) => {
       // 统一角色标识 (向后兼容 boolean 参数: true -> 'biochem', false -> 'general')
       const activePersona = typeof persona === 'string' ? persona : (persona ? 'biochem' : 'general');
+      const viaChrome = () => fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
 
-      // 若已确认无本地独立 Node.js 服务，直接 0 延迟由扩展 Background 承接
-      if (localServerReachable === false) {
-        fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
+      // 已确认无本地 Node 服务且未到重新探测窗口：直接由扩展 Background 承接
+      if (localServerReachable === false && Date.now() < localServerRetryAt) {
+        viaChrome();
         return;
       }
 
       chrome.storage.local.get({
         deepseekApiKey: '',
         glmApiKey: '',
+        glmActiveModel: '',
+        deepseekActiveModel: '',
         customModels: []
       }, (settings) => {
-        let apiKey = settings.deepseekApiKey || settings.glmApiKey;
-        let endpoint = 'https://api.deepseek.com/chat/completions';
-        let modelName = 'deepseek-chat';
-
-        if (engine && engine.startsWith('custom_')) {
-          const customId = engine.substring(7);
-          const cm = settings.customModels.find(m => m.id === customId);
-          if (cm) {
-            apiKey = cm.apiKey;
-            endpoint = cm.endpoint;
-            modelName = cm.modelName;
-          }
+        const creds = resolveLocalEngineCredentials(engine, model, settings);
+        if (!creds) {
+          viaChrome();
+          return;
         }
+
+        const ctrl = new AbortController();
+        const timeoutId = setTimeout(() => ctrl.abort(), LOCAL_SERVER_TIMEOUT_MS);
 
         fetch('http://localhost:3300/api/translate/bio', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: ctrl.signal,
           body: JSON.stringify({
             items,
             targetLang,
             crossPageContext: context,
-            apiKey: apiKey || '',
-            endpoint,
-            model: modelName,
+            apiKey: creds.apiKey,
+            endpoint: creds.endpoint,
+            model: creds.model,
             persona: activePersona,
             enableHybrid: true
           })
-        }).then(r => r.json()).then(res => {
-          localServerReachable = true;
+        }).then(r => {
+          clearTimeout(timeoutId);
+          localServerReachable = true; // 能收到 HTTP 响应即说明服务在线，即便返回非 2xx
+          return r.ok ? r.json() : null;
+        }).then(res => {
           if (res && res.success && Array.isArray(res.translations)) {
             if (res.dispatchStats) {
               console.log(`[${activePersona} 智能分流] ${res.dispatchStats.totalCount} 段落处理完毕: ${res.dispatchStats.freeCount} 段免Key直达，${res.dispatchStats.aiCount} 段大模型推理 (节约 Token: ${res.dispatchStats.savedTokenRatio})`);
@@ -2811,18 +3469,36 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
           // 本地接口异常时无缝回退到扩展 background
-          fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
-        }).catch(() => {
-          // 本地未安装/未启动 Node 服务：记录状态并 0 毫秒平滑由扩展原生接管
-          localServerReachable = false;
-          fallbackChromeBatch(items, engine, targetLang, model, context, activePersona).then(resolve).catch(reject);
+          viaChrome();
+        }).catch((err) => {
+          clearTimeout(timeoutId);
+          if (err && err.name === 'AbortError') {
+            // 服务在线但响应超时：不标记离线，仅本次回退
+            console.warn(`[本地学术引擎] 响应超过 ${LOCAL_SERVER_TIMEOUT_MS / 1000}s，本次回退扩展通道`);
+          } else {
+            // 本地未安装/未启动 Node 服务：标记离线，60s 后允许重新探测
+            localServerReachable = false;
+            localServerRetryAt = Date.now() + LOCAL_SERVER_REPROBE_MS;
+          }
+          viaChrome();
         });
       });
     });
   }
 
+  // 仅当页面由本地 HTTP 服务托管 (server.js) 时，相对路径 /api/translate-batch 才有意义
+
+
   function fallbackChromeBatch(items, engine, targetLang, model, context, persona) {
     return new Promise((resolve, reject) => {
+      const lastResort = (originalErr) => {
+        if (isHttpHosted) {
+          fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
+        } else {
+          // 扩展页内无本地 HTTP 兜底：透传真实错误 (如 API Key 无效 / 额度耗尽)，避免被无关的 Failed to fetch 掩盖
+          reject(new Error(originalErr || '翻译服务未响应'));
+        }
+      };
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({
           action: 'translateBatch',
@@ -2833,16 +3509,16 @@ document.addEventListener('DOMContentLoaded', () => {
           context: context,
           persona: persona
         }, (response) => {
-          if (chrome.runtime.lastError || !response || !response.success) {
-            fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
-          } else if (response.success && Array.isArray(response.translations)) {
+          if (chrome.runtime.lastError) {
+            lastResort(chrome.runtime.lastError.message);
+          } else if (response && response.success && Array.isArray(response.translations)) {
             resolve(response.translations);
           } else {
-            fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
+            lastResort(response && response.error);
           }
         });
       } else {
-        fallbackLocalBatch(items, targetLang, context).then(resolve).catch(reject);
+        lastResort('扩展运行时不可用');
       }
     });
   }
@@ -2865,9 +3541,39 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 7. 翻译单页核心方法 (原排版独立靶向舞台 + 批量 JSON 协议)
+  const translatingPages = new Set(); // `${docId}#${page}` 在途去重，防止重复点击重复扣费与覆盖层互相覆盖
+
   async function translatePage(pageNum, isBatch = false) {
     if (!currentPdf) return;
     const targetPageNum = Math.max(1, Math.min(pageNum || currentPage, currentPdf.numPages));
+
+    // 批量任务进行中禁止插入单页任务，否则会替换全局控制器，导致“停止”按钮无法中止批量任务
+    if (!isBatch && isTranslatingDoc) {
+      showToast('正在批量翻译中，请稍候或先停止当前任务');
+      return;
+    }
+
+    const inflightKey = `${currentDocId}#${targetPageNum}`;
+    if (translatingPages.has(inflightKey)) {
+      if (!isBatch) showToast(`第 ${targetPageNum} 页正在翻译中，请稍候`);
+      return;
+    }
+
+    // 单页任务始终使用全新控制器；批量任务沿用调度器控制器
+    const ctrl = (isBatch && activeTranslateController) ? activeTranslateController : { aborted: false };
+    if (!isBatch) activeTranslateController = ctrl;
+    const docIdAtStart = currentDocId;
+    const isStale = () => ctrl.aborted || !currentPdf || currentDocId !== docIdAtStart;
+
+    translatingPages.add(inflightKey);
+    try {
+      await translatePageInner(targetPageNum, isBatch, isStale);
+    } finally {
+      translatingPages.delete(inflightKey);
+    }
+  }
+
+  async function translatePageInner(targetPageNum, isBatch, isStale) {
     const skipFormulas = skipFormulasCheckbox ? skipFormulasCheckbox.checked : true;
 
     // 1. 展开并显示右侧排版对照栏及顶部操作区
@@ -2878,6 +3584,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 2. 渲染右侧当前页独立靶向画板（Stage）
     const stage = await renderTransStageForPage(targetPageNum);
+    if (isStale()) return;
     if (!stage) {
       console.error(`挂载第 ${targetPageNum} 页舞台失败`);
       return;
@@ -2888,6 +3595,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 3. 提取并结构化页面内容块与物理边界
     const blocks = await extractPageBlocks(page, skipFormulas);
+    if (isStale()) return;
 
     if (!blocks || blocks.length === 0) {
       if (scannedPdfAlert) {
@@ -2996,28 +3704,47 @@ document.addEventListener('DOMContentLoaded', () => {
         console.warn('获取跨页上下文忽略:', ctxErr);
       }
 
-      const payload = tasksToTranslate.map(t => ({ id: t.block.id, text: t.textToTranslate }));
+      // 使用短小的顺序索引作为请求 id：降低 Token 消耗，并规避大模型篡改长随机 id / 数字与字符串 id 类型不一致导致的回填失配
+      const payload = tasksToTranslate.map((t, idx) => ({ id: idx, text: t.textToTranslate }));
       let transResults;
       try {
         transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel, crossPageContext, currentPersona);
       } catch (firstErr) {
+        if (isStale()) throw firstErr;
         console.warn(`第 ${targetPageNum} 页批量翻译遇阻，正在退避重试:`, firstErr.message);
         if (isBatch) showToast(`通道繁忙，第 ${targetPageNum} 页启动退避重试...`);
         await new Promise(r => setTimeout(r, 1200));
         transResults = await requestBatchTranslation(payload, engine, targetLang, selectedModel, crossPageContext, currentPersona);
       }
 
-      if (activeTranslateController && activeTranslateController.aborted) return;
+      if (isStale()) {
+        // 已中止或已切换文档：丢弃结果并清理“翻译中...”占位，绝不写入新文档的缓存
+        tasksToTranslate.forEach(t => t.overlayBlock && t.overlayBlock.remove());
+        return;
+      }
 
       const transMap = new Map();
       if (Array.isArray(transResults)) {
-        transResults.forEach(r => transMap.set(r.id, r.text));
+        transResults.forEach(r => {
+          if (r && typeof r.text === 'string' && r.text.trim()) transMap.set(String(r.id), r.text);
+        });
+      }
+      if (transMap.size === 0) {
+        throw new Error('翻译服务返回空结果');
       }
 
-      for (const task of tasksToTranslate) {
-        const rawTrans = transMap.get(task.block.id) || task.block.originalText;
-        const finalText = task.tokenMap ? restoreInlineFormulas(rawTrans, task.tokenMap) : rawTrans;
-        task.block.transText = finalText;
+      let missingCount = 0;
+      tasksToTranslate.forEach((task, idx) => {
+        const rawTrans = transMap.get(String(idx));
+        // 缺失块以原文占位展示，但标记 untranslated，使断点续译可自动重试该页
+        task.block.untranslated = !rawTrans;
+        if (!rawTrans) missingCount++;
+        const base = rawTrans || task.block.originalText;
+        task.block.transText = task.tokenMap ? restoreInlineFormulas(base, task.tokenMap) : base;
+      });
+      blocks.forEach(b => { b.targetLang = targetLang; });
+      if (missingCount > 0) {
+        console.warn(`第 ${targetPageNum} 页有 ${missingCount} 个段落未返回译文，已保留原文并标记待重译`);
       }
 
       // 再次确认色彩采样
@@ -3077,9 +3804,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 检查是否所有页面都已经翻译完成
     let untranslatedPages = [];
     for (let p = 1; p <= totalPages; p++) {
-      const cached = pageTranslations.get(p);
-      const isDone = cached && cached.length > 0 && cached.some(b => b.transText);
-      if (!isDone) untranslatedPages.push(p);
+      if (!isPageTranslated(p)) untranslatedPages.push(p);
     }
 
     // 核心优化：若全文已经 100% 翻译完毕，再次点击不再空转，而是直接执行下载与打开导出面板！
@@ -3129,10 +3854,8 @@ document.addEventListener('DOMContentLoaded', () => {
       transProgressFill.style.width = `${percent}%`;
       transProgressLabel.textContent = `正在翻译第 ${p} / ${totalPages} 页 (${percent}%)...`;
 
-      // 智能断点续译：已翻译完成的页面直接跳过，避免重复消耗 API 额度与时间
-      const cached = pageTranslations.get(p);
-      const isAlreadyDone = cached && cached.length > 0 && cached.some(b => b.transText);
-      if (isAlreadyDone) {
+      // 智能断点续译：已翻译完成且与目标语言一致的页面直接跳过，避免重复消耗 API 额度与时间
+      if (isPageTranslated(p)) {
         updateThumbnailStatus(p);
         continue;
       }
@@ -3223,9 +3946,7 @@ document.addEventListener('DOMContentLoaded', () => {
       transProgressFill.style.width = `${percent}%`;
       transProgressLabel.textContent = `正在翻译第 ${p} 页 (${idx + 1}/${total} 页, ${percent}%)...`;
 
-      const cached = pageTranslations.get(p);
-      const isAlreadyDone = cached && cached.length > 0 && cached.some(b => b.transText);
-      if (!isAlreadyDone) {
+      if (!isPageTranslated(p)) {
         await translatePage(p, true);
       }
       updateThumbnailStatus(p);
@@ -3379,10 +4100,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     targetLanguageSelect.addEventListener('change', () => {
       chrome.storage.local.set({ defaultTargetLang: targetLanguageSelect.value });
+      updateTranslateDocButtonState();
       if (pageTranslations.has(currentPage)) {
         translatePage(currentPage, false);
       }
     });
+  }
+
+  // 内置权威学术提示词模板 (可由用户在高级排版选项中无损微调并即时生效)
+  const DEFAULT_PERSONA_PROMPTS = {
+    biochem: `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
+请将待翻译的学术文本精准翻译为目标语言。
+学术翻译强制要求：
+1. 术语严格符合《中国化学会命名原则》与全国科学技术名词审定委员会《生物化学名词》标准。
+2. 严禁字面硬翻实验标准方法 (如 Western blot 译为 免疫印迹法；RT-qPCR 译为 逆转录定量PCR；Apoptosis 译为 细胞凋亡)。
+3. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保持原始阿拉伯数字形态与格式，严禁转写为汉字。
+4. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、机构名称、国际组织、学术专属名词仅在当前页首次出现时紧跟半角括号备注原文；后续重复出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
+5. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，译文必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯，切勿生硬切碎。
+6. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L 等 SI 单位绝对保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改。
+请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`,
+
+    economics: `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼资深金融翻译家。
+请将待翻译的学术文本精准翻译为目标语言。
+学术规范：
+1. 术语权威定名：严格遵循经典经济学与金融工程规范审定名词（如 Quantitative Easing 译为 量化宽松；Phillips Curve 译为 菲利普斯曲线；Deadweight Loss 译为 无谓损失）。
+2. 计量逻辑严密：准确传达计量因果推断（OLS、IV、DID、RDD）与统计显著性。
+3. 数字严禁汉化：所有阿拉伯数字、百分比、指数、统计量必须 100% 保持原始阿拉伯数字形态与格式，严禁转写为汉字。
+4. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词仅在当前页首次出现时紧跟半角括号备注原文，后续重复出现时直接采用中文定名，严禁重复附加英文括号。
+5. 多行标题与自然段落智能区分：包含换行符 \\n 的独立多行标题或条目清单必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯。
+6. 国际单位与占位符保护：USD, bps, %, pt 等保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置。
+请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`
+  };
+
+  let editingPersona = 'biochem';
+
+  function updateEditPromptButtonVisibility(persona) {
+    if (!advEditPromptBtn) return;
+    if (persona === 'general') {
+      advEditPromptBtn.classList.add('hidden');
+    } else {
+      advEditPromptBtn.classList.remove('hidden');
+      advEditPromptBtn.setAttribute('title', `修改【${persona === 'biochem' ? '生化学术专家' : '经济学专家'}】系统提示词`);
+    }
   }
 
   // 翻译专家角色体系管理与多处联动
@@ -3390,12 +4149,13 @@ document.addEventListener('DOMContentLoaded', () => {
     currentPersona = newVal || 'general';
     if (personaSelect) personaSelect.value = currentPersona;
     if (advPersonaSelect) advPersonaSelect.value = currentPersona;
+    updateEditPromptButtonVisibility(currentPersona);
     chrome.storage.local.set({ translationPersona: currentPersona });
 
     const personaLabels = {
-      general: '默认通用翻译 (大众通俗·流畅自然)',
-      biochem: '生化学术专家 (博士前沿·3,100+权威术语)',
-      economics: '经济学专家 (顶刊标准·量化与计量)'
+      general: '默认通用翻译',
+      biochem: '生化学术专家',
+      economics: '经济学专家'
     };
     showToast(`翻译角色已切换为: ${personaLabels[currentPersona] || currentPersona}`);
   }
@@ -3413,7 +4173,82 @@ document.addEventListener('DOMContentLoaded', () => {
       if (personaSelect) personaSelect.value = currentPersona;
       if (advPersonaSelect) advPersonaSelect.value = currentPersona;
     }
+    updateEditPromptButtonVisibility(currentPersona);
   });
+
+  // 角色系统提示词在线编辑器 (Prompt Editor)
+  if (advEditPromptBtn) {
+    advEditPromptBtn.addEventListener('click', () => {
+      editingPersona = currentPersona === 'general' ? 'biochem' : currentPersona;
+      const personaNames = {
+        biochem: '生化学术专家',
+        economics: '经济学专家'
+      };
+      if (promptModalTitle) {
+        promptModalTitle.textContent = `修改【${personaNames[editingPersona] || editingPersona}】系统提示词`;
+      }
+      chrome.storage.local.get({ customPersonaPrompts: {} }, (res) => {
+        const customPrompts = res.customPersonaPrompts || {};
+        const currentPrompt = customPrompts[editingPersona] || DEFAULT_PERSONA_PROMPTS[editingPersona] || '';
+        if (personaPromptTextarea) {
+          personaPromptTextarea.value = currentPrompt;
+        }
+        if (personaPromptModal) {
+          personaPromptModal.classList.remove('hidden');
+        }
+      });
+    });
+  }
+
+  if (closePromptModalBtn && personaPromptModal) {
+    closePromptModalBtn.addEventListener('click', () => {
+      personaPromptModal.classList.add('hidden');
+    });
+  }
+
+  if (btnCancelPrompt && personaPromptModal) {
+    btnCancelPrompt.addEventListener('click', () => {
+      personaPromptModal.classList.add('hidden');
+    });
+  }
+
+  if (btnRestorePrompt) {
+    btnRestorePrompt.addEventListener('click', () => {
+      const personaNames = {
+        biochem: '生化学术专家',
+        economics: '经济学专家'
+      };
+      if (confirm(`确定恢复【${personaNames[editingPersona] || editingPersona}】默认权威提示词吗？`)) {
+        if (personaPromptTextarea) {
+          personaPromptTextarea.value = DEFAULT_PERSONA_PROMPTS[editingPersona] || '';
+        }
+      }
+    });
+  }
+
+  if (btnSavePrompt) {
+    btnSavePrompt.addEventListener('click', () => {
+      const newPrompt = (personaPromptTextarea ? personaPromptTextarea.value : '').trim();
+      chrome.storage.local.get({ customPersonaPrompts: {} }, (res) => {
+        const customPrompts = res.customPersonaPrompts || {};
+        if (newPrompt && newPrompt !== (DEFAULT_PERSONA_PROMPTS[editingPersona] || '').trim()) {
+          customPrompts[editingPersona] = newPrompt;
+        } else {
+          delete customPrompts[editingPersona];
+        }
+        chrome.storage.local.set({ customPersonaPrompts: customPrompts }, () => {
+          if (personaPromptModal) {
+            personaPromptModal.classList.add('hidden');
+          }
+          const personaNames = {
+            biochem: '生化学术专家',
+            economics: '经济学专家'
+          };
+          showToast(`✓ 【${personaNames[editingPersona] || editingPersona}】提示词已更新并即时生效`);
+        });
+      });
+    });
+  }
 
   // 高级翻译设置模态框
   if (advancedTransBtn && advancedModal) {
@@ -3453,26 +4288,28 @@ document.addEventListener('DOMContentLoaded', () => {
   if (welcomeFileInput) {
     welcomeFileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
-      if (file) readLocalFile(file);
+      if (file) requestOpenFile(file);
     });
   }
 
   // --- 模式切换与墨迹调色系统 (Edge 风格：文本、画笔、高光、橡皮擦) ---
 
   // 动态绘制正弦波墨迹预览曲线
-  function updateInkWavePreview(color, width, isHighlighter) {
+  function updateInkWavePreview(color, width, isHighlighter, opacity) {
     if (!inkPreviewCanvas) return;
     const ctx = inkPreviewCanvas.getContext('2d');
     const w = inkPreviewCanvas.width;
     const h = inkPreviewCanvas.height;
     ctx.clearRect(0, 0, w, h);
 
+    ctx.save();
     ctx.beginPath();
     ctx.strokeStyle = color;
     ctx.lineWidth = Math.min(width, 24);
     ctx.lineCap = isHighlighter ? 'square' : 'round';
     ctx.lineJoin = 'round';
-    ctx.globalAlpha = isHighlighter ? 0.45 : 1.0;
+    const effectiveOpacity = opacity !== undefined ? opacity : (isHighlighter ? currentHighlighterOpacity : 1.0);
+    ctx.globalAlpha = isHighlighter ? effectiveOpacity : 1.0;
 
     const centerY = h / 2;
     const amplitude = 7;
@@ -3486,7 +4323,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.lineTo(x, y);
     }
     ctx.stroke();
-    ctx.globalAlpha = 1.0;
+    ctx.restore();
   }
 
   // 渲染调色板矩阵 (30 色画笔 vs 5 色荧光笔)
@@ -3501,6 +4338,20 @@ document.addEventListener('DOMContentLoaded', () => {
       inkColorsGrid.classList.add('highlighter-mode');
     } else {
       inkColorsGrid.classList.remove('highlighter-mode');
+    }
+
+    // 控制透明度控制区显示/隐藏 (仅高光荧光笔显示)
+    if (inkOpacitySection) {
+      if (isHighlighter) {
+        inkOpacitySection.classList.remove('hidden');
+        if (inkOpacitySlider && inkOpacityBadge) {
+          const pct = Math.round(currentHighlighterOpacity * 100);
+          inkOpacitySlider.value = pct.toString();
+          inkOpacityBadge.textContent = `${pct}%`;
+        }
+      } else {
+        inkOpacitySection.classList.add('hidden');
+      }
     }
 
     palette.forEach(color => {
@@ -3520,18 +4371,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isHighlighter) {
           currentHighlighterColor = color;
           if (highlighterColorIndicator) highlighterColorIndicator.style.backgroundColor = color;
-          updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true);
+          updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true, currentHighlighterOpacity);
         } else {
           currentPenColor = color;
           if (penColorIndicator) penColorIndicator.style.backgroundColor = color;
-          updateInkWavePreview(currentPenColor, currentPenWidth, false);
+          updateInkWavePreview(currentPenColor, currentPenWidth, false, 1.0);
         }
 
         chrome.storage.local.set({
           inkPenColor: currentPenColor,
           inkPenWidth: currentPenWidth,
           inkHighlighterColor: currentHighlighterColor,
-          inkHighlighterWidth: currentHighlighterWidth
+          inkHighlighterWidth: currentHighlighterWidth,
+          inkHighlighterOpacity: currentHighlighterOpacity
         });
       });
 
@@ -3545,13 +4397,13 @@ document.addEventListener('DOMContentLoaded', () => {
         inkWidthSlider.max = '36';
         inkWidthSlider.value = currentHighlighterWidth.toString();
         inkWidthBadge.textContent = `${currentHighlighterWidth}px`;
-        updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true);
+        updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true, currentHighlighterOpacity);
       } else {
         inkWidthSlider.min = '1';
         inkWidthSlider.max = '24';
         inkWidthSlider.value = currentPenWidth.toString();
         inkWidthBadge.textContent = `${currentPenWidth}px`;
-        updateInkWavePreview(currentPenColor, currentPenWidth, false);
+        updateInkWavePreview(currentPenColor, currentPenWidth, false, 1.0);
       }
     }
   }
@@ -3589,14 +4441,27 @@ document.addEventListener('DOMContentLoaded', () => {
       if (inkWidthBadge) inkWidthBadge.textContent = `${val}px`;
       if (activePopoverTool === 'highlighter') {
         currentHighlighterWidth = val;
-        updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true);
+        updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true, currentHighlighterOpacity);
       } else {
         currentPenWidth = val;
-        updateInkWavePreview(currentPenColor, currentPenWidth, false);
+        updateInkWavePreview(currentPenColor, currentPenWidth, false, 1.0);
       }
       chrome.storage.local.set({
         inkPenWidth: currentPenWidth,
         inkHighlighterWidth: currentHighlighterWidth
+      });
+    });
+  }
+
+  // 绑定高光透明度滑块输入 (10% - 100%)
+  if (inkOpacitySlider) {
+    inkOpacitySlider.addEventListener('input', () => {
+      const val = parseInt(inkOpacitySlider.value, 10) || 35;
+      currentHighlighterOpacity = Math.max(0.1, Math.min(1.0, val / 100));
+      if (inkOpacityBadge) inkOpacityBadge.textContent = `${val}%`;
+      updateInkWavePreview(currentHighlighterColor, currentHighlighterWidth, true, currentHighlighterOpacity);
+      chrome.storage.local.set({
+        inkHighlighterOpacity: currentHighlighterOpacity
       });
     });
   }
@@ -3617,12 +4482,16 @@ document.addEventListener('DOMContentLoaded', () => {
     inkPenColor: '#0078D4',
     inkPenWidth: 3,
     inkHighlighterColor: '#FFF176',
-    inkHighlighterWidth: 16
+    inkHighlighterWidth: 16,
+    inkHighlighterOpacity: 0.35
   }, (res) => {
     currentPenColor = res.inkPenColor || '#0078D4';
     currentPenWidth = res.inkPenWidth || 3;
     currentHighlighterColor = res.inkHighlighterColor || '#FFF176';
     currentHighlighterWidth = res.inkHighlighterWidth || 16;
+    currentHighlighterOpacity = (res.inkHighlighterOpacity !== undefined) ? res.inkHighlighterOpacity : 0.35;
+    if (inkOpacitySlider) inkOpacitySlider.value = Math.round(currentHighlighterOpacity * 100).toString();
+    if (inkOpacityBadge) inkOpacityBadge.textContent = `${Math.round(currentHighlighterOpacity * 100)}%`;
     if (penColorIndicator) penColorIndicator.style.backgroundColor = currentPenColor;
     if (highlighterColorIndicator) highlighterColorIndicator.style.backgroundColor = currentHighlighterColor;
   });
@@ -3695,10 +4564,8 @@ document.addEventListener('DOMContentLoaded', () => {
     strokes.pop();
     if (strokes.length === 0) {
       pageDrawings.delete(currentPage);
-      if (currentDocId) DocStorage.deleteDrawing(currentDocId, currentPage);
-    } else {
-      if (currentDocId) DocStorage.saveDrawing(currentDocId, currentPage, strokes);
     }
+    markNotesDirty();
     refreshPageAnnotationCanvas(currentPage);
     showToast(`已撤销第 ${currentPage} 页最后一笔批注`);
   }
@@ -3710,7 +4577,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     pageDrawings.delete(currentPage);
-    if (currentDocId) DocStorage.deleteDrawing(currentDocId, currentPage);
+    markNotesDirty();
     refreshPageAnnotationCanvas(currentPage);
     showToast(`已清空第 ${currentPage} 页手绘批注`);
   }
@@ -3773,6 +4640,177 @@ document.addEventListener('DOMContentLoaded', () => {
   if (drawClearBtn) {
     drawClearBtn.addEventListener('click', clearCurrentPageAnnotations);
   }
+
+  if (drawSaveBtn) {
+    drawSaveBtn.addEventListener('click', saveCurrentNotes);
+  }
+
+  if (saveDocBtn) {
+    saveDocBtn.addEventListener('click', saveCurrentNotes);
+  }
+
+  // 保存下拉拆分按钮与菜单交互
+  if (saveArrowBtn) {
+    saveArrowBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!currentPdf || saveArrowBtn.disabled) return;
+      if (saveDropdownMenu) {
+        saveDropdownMenu.classList.toggle('hidden');
+      }
+    });
+  }
+
+  // 点击外部收起保存下拉菜单
+  document.addEventListener('click', (e) => {
+    if (saveDropdownMenu && !saveDropdownMenu.classList.contains('hidden')) {
+      if (!e.target.closest('.save-split-btn-group')) {
+        saveDropdownMenu.classList.add('hidden');
+      }
+    }
+  });
+
+  // 保存下拉菜单各项动作绑定
+  if (menuSaveLocal) {
+    menuSaveLocal.addEventListener('click', () => {
+      if (saveDropdownMenu) saveDropdownMenu.classList.add('hidden');
+      saveCurrentNotes();
+    });
+  }
+
+  if (menuExportPdf) {
+    menuExportPdf.addEventListener('click', () => {
+      if (saveDropdownMenu) saveDropdownMenu.classList.add('hidden');
+      printPdfWithAnnotations();
+    });
+  }
+
+  if (menuExportBilingual) {
+    menuExportBilingual.addEventListener('click', () => {
+      if (saveDropdownMenu) saveDropdownMenu.classList.add('hidden');
+      exportBilingualDocument('download');
+    });
+  }
+
+  if (menuExportTxt) {
+    menuExportTxt.addEventListener('click', () => {
+      if (saveDropdownMenu) saveDropdownMenu.classList.add('hidden');
+      exportPlainText();
+    });
+  }
+
+  // 导出带批注 PDF 范围选择模态框交互绑定
+  if (closeExportPdfModalBtn) closeExportPdfModalBtn.addEventListener('click', closeExportPdfModal);
+  if (btnExportPdfCancel) btnExportPdfCancel.addEventListener('click', closeExportPdfModal);
+
+  if (exportPdfModal) {
+    const rangeRadios = exportPdfModal.querySelectorAll('input[name="export-pdf-range"]');
+    rangeRadios.forEach(radio => {
+      radio.addEventListener('change', () => {
+        updateExportPdfSummary();
+      });
+    });
+
+    if (exportPdfCustomInput) {
+      exportPdfCustomInput.addEventListener('focus', () => {
+        const customRadio = exportPdfModal.querySelector('input[value="custom"]');
+        if (customRadio) {
+          customRadio.checked = true;
+          updateExportPdfSummary();
+        }
+      });
+      exportPdfCustomInput.addEventListener('input', () => {
+        updateExportPdfSummary();
+      });
+    }
+  }
+
+  if (btnExportPdfConfirm) {
+    btnExportPdfConfirm.addEventListener('click', () => {
+      const pages = getExportPdfSelectedPages();
+      if (!pages || pages.length === 0) {
+        showToast('⚠️ 未选择任何有效页码，请重新指定');
+        return;
+      }
+      closeExportPdfModal();
+      printPdfWithAnnotations(pages);
+    });
+  }
+
+  // 草稿快照恢复与丢弃交互
+  if (btnDraftRestore) {
+    btnDraftRestore.addEventListener('click', () => {
+      if (!activeDraftData || !activeDraftData.drawings) return;
+      let restoredPages = 0;
+      activeDraftData.drawings.forEach((strokes, p) => {
+        pageDrawings.set(p, strokes);
+        restoredPages++;
+      });
+      refreshPageAnnotationCanvas(currentPage);
+      markNotesDirty();
+      if (draftRecoveryBanner) draftRecoveryBanner.classList.add('hidden');
+      activeDraftData = null;
+      showToast(`已成功恢复 ${restoredPages} 页草稿手绘批注（请及时保存）`);
+    });
+  }
+
+  if (btnDraftDiscard) {
+    btnDraftDiscard.addEventListener('click', async () => {
+      if (currentDocId) {
+        await DocStorage.clearDraft(currentDocId);
+      }
+      if (draftRecoveryBanner) draftRecoveryBanner.classList.add('hidden');
+      activeDraftData = null;
+      showToast('已放弃临时草稿快照');
+    });
+  }
+
+  // 确认未保存弹窗交互
+  if (closeUnsavedModalBtn) closeUnsavedModalBtn.addEventListener('click', closeUnsavedModal);
+  if (btnUnsavedCancel) btnUnsavedCancel.addEventListener('click', closeUnsavedModal);
+
+  if (btnUnsavedDiscard) {
+    btnUnsavedDiscard.addEventListener('click', () => {
+      const nextFile = pendingFileToOpen;
+      hasUnsavedNotes = false;
+      updateSaveButtonState();
+      if (unsavedNotesModal) unsavedNotesModal.classList.add('hidden');
+      pendingFileToOpen = null;
+      if (nextFile) {
+        readLocalFile(nextFile);
+      }
+    });
+  }
+
+  if (btnUnsavedSave) {
+    btnUnsavedSave.addEventListener('click', async () => {
+      const nextFile = pendingFileToOpen;
+      if (unsavedNotesModal) unsavedNotesModal.classList.add('hidden');
+      pendingFileToOpen = null;
+      await saveCurrentNotes();
+      if (nextFile) {
+        readLocalFile(nextFile);
+      }
+    });
+  }
+
+  // 关闭窗口/标签页前未保存拦截提醒
+  window.addEventListener('beforeunload', (e) => {
+    if (hasUnsavedNotes) {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+  });
+
+  // 全局 Ctrl+S / Cmd+S 快捷保存手绘与阅读笔记
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
+      if (currentPdf) {
+        e.preventDefault();
+        saveCurrentNotes();
+      }
+    }
+  });
 
   // 画笔/批注模式下全局 Ctrl+Z 撤销最后一笔
   window.addEventListener('keydown', (e) => {
@@ -4174,8 +5212,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const totalPages = currentPdf.numPages;
       let translatedCount = 0;
       for (let p = 1; p <= totalPages; p++) {
-        const cached = pageTranslations.get(p);
-        if (cached && cached.length > 0 && cached.some(b => b.transText)) {
+        if (isPageTranslated(p)) {
           translatedCount++;
         }
       }
@@ -4320,7 +5357,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- 智能图标功能解释小浮窗 (Smart Tooltips) ---
+  // --- 智能图标功能解释小浮窗 (Smart Tooltips: 仅保留翻译角色 iOS 毛玻璃气泡) ---
   function initSmartTooltips() {
     const tooltipEl = document.getElementById('pdf-smart-tooltip');
     if (!tooltipEl) return;
@@ -4329,23 +5366,48 @@ document.addEventListener('DOMContentLoaded', () => {
     let hideTimeout = null;
 
     document.addEventListener('mouseover', (e) => {
-      const target = e.target.closest('[data-tooltip-title]');
+      // 仅保留学术翻译角色这一处的智能悬浮提示标注
+      const target = e.target.closest('.persona-select-group[data-tooltip-persona], [data-tooltip-persona]');
       if (!target) return;
       if (target === currentTarget) return;
 
       currentTarget = target;
       clearTimeout(hideTimeout);
 
-      const title = target.getAttribute('data-tooltip-title') || '';
-      const desc = target.getAttribute('data-tooltip-desc') || '';
-      const shortcut = target.getAttribute('data-tooltip-shortcut');
-
       tooltipEl.innerHTML = `
-        <div class="tooltip-header">
-          <span class="tooltip-title">${title}</span>
-          ${shortcut ? `<span class="tooltip-shortcut">${shortcut}</span>` : ''}
+        <div class="ios-tooltip-header">
+          <div class="ios-tooltip-icon">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2l9 4.9V17L12 22 3 17V6.9z"></path><path d="M12 22V12"></path><path d="M12 12L3 6.9"></path><path d="M12 12l9-5.1"></path></svg>
+          </div>
+          <span class="ios-tooltip-title">学术翻译角色体系</span>
         </div>
-        <div class="tooltip-desc">${desc}</div>
+        <div class="ios-persona-list">
+          <div class="ios-persona-item ${currentPersona === 'general' ? 'active' : ''}">
+            <div class="ios-persona-head">
+              <span>默认通用</span>
+              <span class="ios-persona-badge">通俗自然</span>
+            </div>
+            <p class="ios-persona-desc">面向大众阅读与日常文献，语言流畅顺达，无额外词库开销。</p>
+          </div>
+          <div class="ios-persona-item ${currentPersona === 'biochem' ? 'active' : ''}">
+            <div class="ios-persona-head">
+              <span>生化学术</span>
+              <span class="ios-persona-badge">3105词库·CAS保护</span>
+            </div>
+            <p class="ios-persona-desc">中国化学会与科技名词标准，化学式、分子活性与实验方法严格定名。</p>
+          </div>
+          <div class="ios-persona-item ${currentPersona === 'economics' ? 'active' : ''}">
+            <div class="ios-persona-head">
+              <span>经济金融</span>
+              <span class="ios-persona-badge">AER顶刊标准</span>
+            </div>
+            <p class="ios-persona-desc">宏微观经济理论、计量因果推断（OLS/DID/IV）与金融工程规范审定。</p>
+          </div>
+        </div>
+        <div class="ios-tooltip-footer">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          <span>可在右上角“高级选项”微调提示词</span>
+        </div>
       `;
 
       // 计算位置与智能视口避让
@@ -4372,7 +5434,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.addEventListener('mouseout', (e) => {
-      const target = e.target.closest('[data-tooltip-title]');
+      const target = e.target.closest('.persona-select-group[data-tooltip-persona], [data-tooltip-persona]');
       if (!target) return;
       if (target === currentTarget) {
         currentTarget = null;

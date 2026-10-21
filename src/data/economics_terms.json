@@ -1,0 +1,922 @@
+{
+  "description": "经济学、金融学与量化计量前沿权威学术术语知识库 (遵循 AER、JPE、QJE、Econometrica 顶刊规范)",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-20T02:18:30.762Z",
+  "totalCount": 97,
+  "terms": {
+    "gross domestic product": {
+      "en": "Gross domestic product",
+      "zh": "国内生产总值",
+      "abbr": "GDP",
+      "category": "宏观经济学/国民账户",
+      "otherLangs": {
+        "de": "Bruttoinlandsprodukt",
+        "fr": "produit intérieur brut"
+      }
+    },
+    "gdp": {
+      "en": "GDP",
+      "zh": "国内生产总值 (Gross domestic product 缩写)",
+      "abbr": "GDP",
+      "category": "宏观经济学/国民账户",
+      "otherLangs": {
+        "de": "Bruttoinlandsprodukt",
+        "fr": "produit intérieur brut"
+      }
+    },
+    "gross national product": {
+      "en": "Gross national product",
+      "zh": "国民生产总值",
+      "abbr": "GNP",
+      "category": "宏观经济学/国民账户",
+      "otherLangs": {
+        "de": "Bruttosozialprodukt",
+        "fr": "produit national brut"
+      }
+    },
+    "gnp": {
+      "en": "GNP",
+      "zh": "国民生产总值 (Gross national product 缩写)",
+      "abbr": "GNP",
+      "category": "宏观经济学/国民账户",
+      "otherLangs": {
+        "de": "Bruttosozialprodukt",
+        "fr": "produit national brut"
+      }
+    },
+    "consumer price index": {
+      "en": "Consumer price index",
+      "zh": "消费者价格指数",
+      "abbr": "CPI",
+      "category": "宏观经济学/通货膨胀",
+      "otherLangs": {
+        "de": "Verbraucherpreisindex",
+        "fr": "indice des prix à la consommation"
+      }
+    },
+    "cpi": {
+      "en": "CPI",
+      "zh": "消费者价格指数 (Consumer price index 缩写)",
+      "abbr": "CPI",
+      "category": "宏观经济学/通货膨胀",
+      "otherLangs": {
+        "de": "Verbraucherpreisindex",
+        "fr": "indice des prix à la consommation"
+      }
+    },
+    "producer price index": {
+      "en": "Producer price index",
+      "zh": "生产者物价指数",
+      "abbr": "PPI",
+      "category": "宏观经济学/价格指数",
+      "otherLangs": {
+        "de": "Erzeugerpreisindex"
+      }
+    },
+    "ppi": {
+      "en": "PPI",
+      "zh": "生产者物价指数 (Producer price index 缩写)",
+      "abbr": "PPI",
+      "category": "宏观经济学/价格指数",
+      "otherLangs": {
+        "de": "Erzeugerpreisindex"
+      }
+    },
+    "quantitative easing": {
+      "en": "Quantitative easing",
+      "zh": "量化宽松货币政策",
+      "abbr": "QE",
+      "category": "货币银行学/非常规货币政策",
+      "otherLangs": {
+        "de": "Quantitative Lockerung",
+        "fr": "assouplissement quantitatif"
+      }
+    },
+    "qe": {
+      "en": "QE",
+      "zh": "量化宽松货币政策 (Quantitative easing 缩写)",
+      "abbr": "QE",
+      "category": "货币银行学/非常规货币政策",
+      "otherLangs": {
+        "de": "Quantitative Lockerung",
+        "fr": "assouplissement quantitatif"
+      }
+    },
+    "quantitative tightening": {
+      "en": "Quantitative tightening",
+      "zh": "量化紧缩 (缩表)",
+      "abbr": "QT",
+      "category": "货币银行学/货币政策",
+      "otherLangs": {
+        "de": "Quantitative Straffung"
+      }
+    },
+    "qt": {
+      "en": "QT",
+      "zh": "量化紧缩 (缩表) (Quantitative tightening 缩写)",
+      "abbr": "QT",
+      "category": "货币银行学/货币政策",
+      "otherLangs": {
+        "de": "Quantitative Straffung"
+      }
+    },
+    "liquidity trap": {
+      "en": "Liquidity Trap",
+      "zh": "流动性陷阱 (凯恩斯流动性偏好陷阱) (Liquidity trap 缩写)",
+      "abbr": "Liquidity Trap",
+      "category": "宏观经济学/货币理论",
+      "otherLangs": {
+        "de": "Liquiditätsfalle",
+        "fr": "trappe à liquidité"
+      }
+    },
+    "phillips curve": {
+      "en": "Phillips Curve",
+      "zh": "菲利普斯曲线 (通胀率与失业率交替关系) (Phillips curve 缩写)",
+      "abbr": "Phillips Curve",
+      "category": "宏观经济学/通胀理论",
+      "otherLangs": {
+        "de": "Phillips-Kurve",
+        "fr": "courbe de Phillips"
+      }
+    },
+    "stagflation": {
+      "en": "Stagflation",
+      "zh": "滞胀 (停滞性通货膨胀) (Stagflation 缩写)",
+      "abbr": "Stagflation",
+      "category": "宏观经济学/经济周期",
+      "otherLangs": {
+        "de": "Stagflation",
+        "fr": "stagflation"
+      }
+    },
+    "fiscal multiplier": {
+      "en": "Fiscal Multiplier",
+      "zh": "财政乘数 (Fiscal multiplier 缩写)",
+      "abbr": "Fiscal Multiplier",
+      "category": "宏观经济学/财政政策",
+      "otherLangs": {
+        "de": "Fiskalmultiplikator",
+        "fr": "multiplicateur budgétaire"
+      }
+    },
+    "open market operations": {
+      "en": "Open market operations",
+      "zh": "公开市场业务",
+      "abbr": "OMO",
+      "category": "中央银行学/货币工具",
+      "otherLangs": {
+        "de": "Offenmarktgeschäfte",
+        "fr": "opérations d'open market"
+      }
+    },
+    "omo": {
+      "en": "OMO",
+      "zh": "公开市场业务 (Open market operations 缩写)",
+      "abbr": "OMO",
+      "category": "中央银行学/货币工具",
+      "otherLangs": {
+        "de": "Offenmarktgeschäfte",
+        "fr": "opérations d'open market"
+      }
+    },
+    "reserve requirement ratio": {
+      "en": "Reserve requirement ratio",
+      "zh": "法定存款准备金率",
+      "abbr": "RRR",
+      "category": "货币金融学/货币政策",
+      "otherLangs": {
+        "de": "Mindestreservesatz"
+      }
+    },
+    "rrr": {
+      "en": "RRR",
+      "zh": "法定存款准备金率 (Reserve requirement ratio 缩写)",
+      "abbr": "RRR",
+      "category": "货币金融学/货币政策",
+      "otherLangs": {
+        "de": "Mindestreservesatz"
+      }
+    },
+    "purchasing power parity": {
+      "en": "Purchasing power parity",
+      "zh": "购买力平价理论",
+      "abbr": "PPP",
+      "category": "国际金融学/汇率决定",
+      "otherLangs": {
+        "de": "Kaufkraftparität",
+        "fr": "parité de pouvoir d'achat"
+      }
+    },
+    "ppp": {
+      "en": "PPP",
+      "zh": "购买力平价理论 (Purchasing power parity 缩写)",
+      "abbr": "PPP",
+      "category": "国际金融学/汇率决定",
+      "otherLangs": {
+        "de": "Kaufkraftparität",
+        "fr": "parité de pouvoir d'achat"
+      }
+    },
+    "interest rate parity": {
+      "en": "Interest rate parity",
+      "zh": "利率平价理论",
+      "abbr": "IRP",
+      "category": "国际金融学/汇率决定",
+      "otherLangs": {
+        "de": "Zinsparitätentheorie"
+      }
+    },
+    "irp": {
+      "en": "IRP",
+      "zh": "利率平价理论 (Interest rate parity 缩写)",
+      "abbr": "IRP",
+      "category": "国际金融学/汇率决定",
+      "otherLangs": {
+        "de": "Zinsparitätentheorie"
+      }
+    },
+    "current account deficit": {
+      "en": "Current account deficit",
+      "zh": "经常账户赤字",
+      "abbr": "CAD",
+      "category": "国际金融学/国际收支",
+      "otherLangs": {
+        "de": "Leistungsbilanzdefizit"
+      }
+    },
+    "cad": {
+      "en": "CAD",
+      "zh": "经常账户赤字 (Current account deficit 缩写)",
+      "abbr": "CAD",
+      "category": "国际金融学/国际收支",
+      "otherLangs": {
+        "de": "Leistungsbilanzdefizit"
+      }
+    },
+    "non-performing loan": {
+      "en": "Non-performing loan",
+      "zh": "不良贷款",
+      "abbr": "NPL",
+      "category": "商业银行学/信贷风险",
+      "otherLangs": {
+        "de": "Notleidender Kredit"
+      }
+    },
+    "npl": {
+      "en": "NPL",
+      "zh": "不良贷款 (Non-performing loan 缩写)",
+      "abbr": "NPL",
+      "category": "商业银行学/信贷风险",
+      "otherLangs": {
+        "de": "Notleidender Kredit"
+      }
+    },
+    "nash equilibrium": {
+      "en": "Nash equilibrium",
+      "zh": "纳什均衡",
+      "abbr": "Nash Eq.",
+      "category": "博弈论/非合作博弈",
+      "otherLangs": {
+        "de": "Nash-Gleichgewicht",
+        "fr": "équilibre de Nash"
+      }
+    },
+    "nash eq.": {
+      "en": "Nash Eq.",
+      "zh": "纳什均衡 (Nash equilibrium 缩写)",
+      "abbr": "Nash Eq.",
+      "category": "博弈论/非合作博弈",
+      "otherLangs": {
+        "de": "Nash-Gleichgewicht",
+        "fr": "équilibre de Nash"
+      }
+    },
+    "pareto optimality": {
+      "en": "Pareto optimality",
+      "zh": "帕累托最优 (帕累托效率)",
+      "abbr": "Pareto Efficiency",
+      "category": "福利经济学/资源配置",
+      "otherLangs": {
+        "de": "Pareto-Optimum",
+        "fr": "optimum de Pareto"
+      }
+    },
+    "pareto efficiency": {
+      "en": "Pareto Efficiency",
+      "zh": "帕累托最优 (帕累托效率) (Pareto optimality 缩写)",
+      "abbr": "Pareto Efficiency",
+      "category": "福利经济学/资源配置",
+      "otherLangs": {
+        "de": "Pareto-Optimum",
+        "fr": "optimum de Pareto"
+      }
+    },
+    "adverse selection": {
+      "en": "Adverse Selection",
+      "zh": "逆向选择 (事前信息不对称) (Adverse selection 缩写)",
+      "abbr": "Adverse Selection",
+      "category": "信息经济学/市场失灵",
+      "otherLangs": {
+        "de": "Adverse Selektion",
+        "fr": "sélection adverse"
+      }
+    },
+    "moral hazard": {
+      "en": "Moral Hazard",
+      "zh": "道德风险 (事后信息不对称) (Moral hazard 缩写)",
+      "abbr": "Moral Hazard",
+      "category": "信息经济学/契约理论",
+      "otherLangs": {
+        "de": "Moralisches Risiko",
+        "fr": "aléa moral"
+      }
+    },
+    "principal-agent problem": {
+      "en": "Principal-agent problem",
+      "zh": "委托-代理问题",
+      "abbr": "Agency Problem",
+      "category": "契约理论与公司治理",
+      "otherLangs": {
+        "de": "Prinzipal-Agent-Problem"
+      }
+    },
+    "agency problem": {
+      "en": "Agency Problem",
+      "zh": "委托-代理问题 (Principal-agent problem 缩写)",
+      "abbr": "Agency Problem",
+      "category": "契约理论与公司治理",
+      "otherLangs": {
+        "de": "Prinzipal-Agent-Problem"
+      }
+    },
+    "deadweight loss": {
+      "en": "Deadweight loss",
+      "zh": "无谓损失 (社会净福利损失)",
+      "abbr": "DWL",
+      "category": "微观经济学/市场效率",
+      "otherLangs": {
+        "de": "Wohlfahrtsverlust",
+        "fr": "perte sèche"
+      }
+    },
+    "dwl": {
+      "en": "DWL",
+      "zh": "无谓损失 (社会净福利损失) (Deadweight loss 缩写)",
+      "abbr": "DWL",
+      "category": "微观经济学/市场效率",
+      "otherLangs": {
+        "de": "Wohlfahrtsverlust",
+        "fr": "perte sèche"
+      }
+    },
+    "marginal rate of substitution": {
+      "en": "Marginal rate of substitution",
+      "zh": "边际替代率",
+      "abbr": "MRS",
+      "category": "消费者行为理论",
+      "otherLangs": {
+        "de": "Grenzrate der Substitution"
+      }
+    },
+    "mrs": {
+      "en": "MRS",
+      "zh": "边际替代率 (Marginal rate of substitution 缩写)",
+      "abbr": "MRS",
+      "category": "消费者行为理论",
+      "otherLangs": {
+        "de": "Grenzrate der Substitution"
+      }
+    },
+    "marginal cost": {
+      "en": "Marginal cost",
+      "zh": "边际成本",
+      "abbr": "MC",
+      "category": "微观经济学/厂商理论",
+      "otherLangs": {
+        "de": "Grenzkosten",
+        "fr": "coût marginal"
+      }
+    },
+    "mc": {
+      "en": "MC",
+      "zh": "边际成本 (Marginal cost 缩写)",
+      "abbr": "MC",
+      "category": "微观经济学/厂商理论",
+      "otherLangs": {
+        "de": "Grenzkosten",
+        "fr": "coût marginal"
+      }
+    },
+    "marginal revenue": {
+      "en": "Marginal revenue",
+      "zh": "边际收益",
+      "abbr": "MR",
+      "category": "微观经济学/厂商理论",
+      "otherLangs": {
+        "de": "Grenzerlös",
+        "fr": "recette marginale"
+      }
+    },
+    "mr": {
+      "en": "MR",
+      "zh": "边际收益 (Marginal revenue 缩写)",
+      "abbr": "MR",
+      "category": "微观经济学/厂商理论",
+      "otherLangs": {
+        "de": "Grenzerlös",
+        "fr": "recette marginale"
+      }
+    },
+    "opportunity cost": {
+      "en": "Opportunity cost",
+      "zh": "机会成本",
+      "abbr": "Opp. Cost",
+      "category": "经济学基础/资源权衡",
+      "otherLangs": {
+        "de": "Opportunitätskosten",
+        "fr": "coût d'opportunité"
+      }
+    },
+    "opp. cost": {
+      "en": "Opp. Cost",
+      "zh": "机会成本 (Opportunity cost 缩写)",
+      "abbr": "Opp. Cost",
+      "category": "经济学基础/资源权衡",
+      "otherLangs": {
+        "de": "Opportunitätskosten",
+        "fr": "coût d'opportunité"
+      }
+    },
+    "externality": {
+      "en": "Externality",
+      "zh": "外部性 (正外部性与负外部性) (Externality 缩写)",
+      "abbr": "Externality",
+      "category": "环境经济学/市场失灵",
+      "otherLangs": {
+        "de": "Externalität",
+        "fr": "externalité"
+      }
+    },
+    "tragedy of the commons": {
+      "en": "Tragedy of the commons",
+      "zh": "公地悲剧",
+      "abbr": "Tragedy of Commons",
+      "category": "产权经济学/公共品",
+      "otherLangs": {
+        "de": "Tragik der Allmende"
+      }
+    },
+    "tragedy of commons": {
+      "en": "Tragedy of Commons",
+      "zh": "公地悲剧 (Tragedy of the commons 缩写)",
+      "abbr": "Tragedy of Commons",
+      "category": "产权经济学/公共品",
+      "otherLangs": {
+        "de": "Tragik der Allmende"
+      }
+    },
+    "prisoner's dilemma": {
+      "en": "Prisoner's Dilemma",
+      "zh": "囚徒困境 (Prisoner's dilemma 缩写)",
+      "abbr": "Prisoner's Dilemma",
+      "category": "博弈论/经典模型",
+      "otherLangs": {
+        "de": "Gefangenendilemma",
+        "fr": "dilemme du prisonnier"
+      }
+    },
+    "capital asset pricing model": {
+      "en": "Capital asset pricing model",
+      "zh": "资本资产定价模型",
+      "abbr": "CAPM",
+      "category": "金融学/资产定价",
+      "otherLangs": {
+        "de": "Capital Asset Pricing Model"
+      }
+    },
+    "capm": {
+      "en": "CAPM",
+      "zh": "资本资产定价模型 (Capital asset pricing model 缩写)",
+      "abbr": "CAPM",
+      "category": "金融学/资产定价",
+      "otherLangs": {
+        "de": "Capital Asset Pricing Model"
+      }
+    },
+    "black-scholes model": {
+      "en": "Black-Scholes model",
+      "zh": "布莱克-斯科尔斯期权定价模型",
+      "abbr": "B-S Model",
+      "category": "金融工程/衍生品定价",
+      "otherLangs": {
+        "de": "Black-Scholes-Modell"
+      }
+    },
+    "b-s model": {
+      "en": "B-S Model",
+      "zh": "布莱克-斯科尔斯期权定价模型 (Black-Scholes model 缩写)",
+      "abbr": "B-S Model",
+      "category": "金融工程/衍生品定价",
+      "otherLangs": {
+        "de": "Black-Scholes-Modell"
+      }
+    },
+    "arbitrage pricing theory": {
+      "en": "Arbitrage pricing theory",
+      "zh": "套利定价理论",
+      "abbr": "APT",
+      "category": "金融学/多因子定价",
+      "otherLangs": {
+        "de": "Arbitragepreistheorie"
+      }
+    },
+    "apt": {
+      "en": "APT",
+      "zh": "套利定价理论 (Arbitrage pricing theory 缩写)",
+      "abbr": "APT",
+      "category": "金融学/多因子定价",
+      "otherLangs": {
+        "de": "Arbitragepreistheorie"
+      }
+    },
+    "efficient market hypothesis": {
+      "en": "Efficient market hypothesis",
+      "zh": "有效市场假说 (弱式/半强式/强式有效)",
+      "abbr": "EMH",
+      "category": "金融学/市场微观结构",
+      "otherLangs": {
+        "de": "Markteffizienzhypothese"
+      }
+    },
+    "emh": {
+      "en": "EMH",
+      "zh": "有效市场假说 (弱式/半强式/强式有效) (Efficient market hypothesis 缩写)",
+      "abbr": "EMH",
+      "category": "金融学/市场微观结构",
+      "otherLangs": {
+        "de": "Markteffizienzhypothese"
+      }
+    },
+    "discounted cash flow": {
+      "en": "Discounted cash flow",
+      "zh": "现金流折现估值法",
+      "abbr": "DCF",
+      "category": "公司金融/企业估值",
+      "otherLangs": {
+        "de": "Discounted-Cash-Flow-Methode"
+      }
+    },
+    "dcf": {
+      "en": "DCF",
+      "zh": "现金流折现估值法 (Discounted cash flow 缩写)",
+      "abbr": "DCF",
+      "category": "公司金融/企业估值",
+      "otherLangs": {
+        "de": "Discounted-Cash-Flow-Methode"
+      }
+    },
+    "weighted average cost of capital": {
+      "en": "Weighted average cost of capital",
+      "zh": "加权平均资本成本",
+      "abbr": "WACC",
+      "category": "公司金融/资本结构",
+      "otherLangs": {
+        "de": "Gewichtete durchschnittliche Kapitalkosten"
+      }
+    },
+    "wacc": {
+      "en": "WACC",
+      "zh": "加权平均资本成本 (Weighted average cost of capital 缩写)",
+      "abbr": "WACC",
+      "category": "公司金融/资本结构",
+      "otherLangs": {
+        "de": "Gewichtete durchschnittliche Kapitalkosten"
+      }
+    },
+    "earnings before interest, taxes, depreciation, and amortization": {
+      "en": "Earnings before interest, taxes, depreciation, and amortization",
+      "zh": "息税折旧摊销前利润",
+      "abbr": "EBITDA",
+      "category": "财务分析/企业盈利能力",
+      "otherLangs": {
+        "de": "EBITDA"
+      }
+    },
+    "ebitda": {
+      "en": "EBITDA",
+      "zh": "息税折旧摊销前利润 (Earnings before interest, taxes, depreciation, and amortization 缩写)",
+      "abbr": "EBITDA",
+      "category": "财务分析/企业盈利能力",
+      "otherLangs": {
+        "de": "EBITDA"
+      }
+    },
+    "value at risk": {
+      "en": "Value at risk",
+      "zh": "在险价值 (风险价值度量)",
+      "abbr": "VaR",
+      "category": "金融风险管理/市场风险",
+      "otherLangs": {
+        "de": "Value at Risk"
+      }
+    },
+    "var": {
+      "en": "VAR",
+      "zh": "向量自回归模型 (Vector autoregression 缩写)",
+      "abbr": "VAR",
+      "category": "时间序列分析/宏观计量",
+      "otherLangs": {
+        "de": "Vektorautoregressives Modell"
+      }
+    },
+    "sharpe ratio": {
+      "en": "Sharpe Ratio",
+      "zh": "夏普比率 (超额收益对总风险比率) (Sharpe ratio 缩写)",
+      "abbr": "Sharpe Ratio",
+      "category": "投资组合管理/绩效评价",
+      "otherLangs": {
+        "de": "Sharpe-Quotient"
+      }
+    },
+    "credit default swap": {
+      "en": "Credit default swap",
+      "zh": "信用违约互换",
+      "abbr": "CDS",
+      "category": "金融衍生品/信用衍生品",
+      "otherLangs": {
+        "de": "Kreditausfall-Swap"
+      }
+    },
+    "cds": {
+      "en": "CDS",
+      "zh": "信用违约互换 (Credit default swap 缩写)",
+      "abbr": "CDS",
+      "category": "金融衍生品/信用衍生品",
+      "otherLangs": {
+        "de": "Kreditausfall-Swap"
+      }
+    },
+    "yield curve inversion": {
+      "en": "Yield curve inversion",
+      "zh": "收益率曲线倒挂 (经典衰退前瞻预警指标)",
+      "abbr": "Yield Inversion",
+      "category": "固定收益证券/利率期限结构",
+      "otherLangs": {
+        "de": "Invertierte Zinskurve"
+      }
+    },
+    "yield inversion": {
+      "en": "Yield Inversion",
+      "zh": "收益率曲线倒挂 (经典衰退前瞻预警指标) (Yield curve inversion 缩写)",
+      "abbr": "Yield Inversion",
+      "category": "固定收益证券/利率期限结构",
+      "otherLangs": {
+        "de": "Invertierte Zinskurve"
+      }
+    },
+    "systemic risk": {
+      "en": "Systemic Risk",
+      "zh": "系统性风险 (Systemic risk 缩写)",
+      "abbr": "Systemic Risk",
+      "category": "宏观审慎监管/金融稳定",
+      "otherLangs": {
+        "de": "Systemisches Risiko",
+        "fr": "risque systémique"
+      }
+    },
+    "over-the-counter": {
+      "en": "Over-the-counter",
+      "zh": "场外交易 (柜台交易)",
+      "abbr": "OTC",
+      "category": "金融市场学/交易机制",
+      "otherLangs": {
+        "de": "Außerbörslicher Handel"
+      }
+    },
+    "otc": {
+      "en": "OTC",
+      "zh": "场外交易 (柜台交易) (Over-the-counter 缩写)",
+      "abbr": "OTC",
+      "category": "金融市场学/交易机制",
+      "otherLangs": {
+        "de": "Außerbörslicher Handel"
+      }
+    },
+    "high-frequency trading": {
+      "en": "High-frequency trading",
+      "zh": "高频交易",
+      "abbr": "HFT",
+      "category": "量化投资/算法交易",
+      "otherLangs": {
+        "de": "Hochfrequenzhandel"
+      }
+    },
+    "hft": {
+      "en": "HFT",
+      "zh": "高频交易 (High-frequency trading 缩写)",
+      "abbr": "HFT",
+      "category": "量化投资/算法交易",
+      "otherLangs": {
+        "de": "Hochfrequenzhandel"
+      }
+    },
+    "free cash flow to firm": {
+      "en": "Free cash flow to firm",
+      "zh": "公司自由现金流",
+      "abbr": "FCFF",
+      "category": "公司金融/财务估值",
+      "otherLangs": {
+        "de": "Freier Cashflow für das Unternehmen"
+      }
+    },
+    "fcff": {
+      "en": "FCFF",
+      "zh": "公司自由现金流 (Free cash flow to firm 缩写)",
+      "abbr": "FCFF",
+      "category": "公司金融/财务估值",
+      "otherLangs": {
+        "de": "Freier Cashflow für das Unternehmen"
+      }
+    },
+    "free cash flow to equity": {
+      "en": "Free cash flow to equity",
+      "zh": "股权自由现金流",
+      "abbr": "FCFE",
+      "category": "公司金融/股权估值",
+      "otherLangs": {
+        "de": "Freier Cashflow zum Eigenkapital"
+      }
+    },
+    "fcfe": {
+      "en": "FCFE",
+      "zh": "股权自由现金流 (Free cash flow to equity 缩写)",
+      "abbr": "FCFE",
+      "category": "公司金融/股权估值",
+      "otherLangs": {
+        "de": "Freier Cashflow zum Eigenkapital"
+      }
+    },
+    "ordinary least squares": {
+      "en": "Ordinary least squares",
+      "zh": "普通最小二乘法",
+      "abbr": "OLS",
+      "category": "计量经济学/参数估计",
+      "otherLangs": {
+        "de": "Methode der kleinsten Quadrate",
+        "fr": "moindres carrés ordinaires"
+      }
+    },
+    "ols": {
+      "en": "OLS",
+      "zh": "普通最小二乘法 (Ordinary least squares 缩写)",
+      "abbr": "OLS",
+      "category": "计量经济学/参数估计",
+      "otherLangs": {
+        "de": "Methode der kleinsten Quadrate",
+        "fr": "moindres carrés ordinaires"
+      }
+    },
+    "instrumental variable": {
+      "en": "Instrumental variable",
+      "zh": "工具变量法 (解决内生性问题)",
+      "abbr": "IV",
+      "category": "计量经济学/因果推断",
+      "otherLangs": {
+        "de": "Instrumentvariable",
+        "fr": "variable instrumentale"
+      }
+    },
+    "iv": {
+      "en": "IV",
+      "zh": "工具变量法 (解决内生性问题) (Instrumental variable 缩写)",
+      "abbr": "IV",
+      "category": "计量经济学/因果推断",
+      "otherLangs": {
+        "de": "Instrumentvariable",
+        "fr": "variable instrumentale"
+      }
+    },
+    "difference-in-differences": {
+      "en": "Difference-in-differences",
+      "zh": "双重差分法 (因果政策评估模型)",
+      "abbr": "DID",
+      "category": "实证经济学/政策评估",
+      "otherLangs": {
+        "de": "Differenz-von-Differenzen-Ansatz"
+      }
+    },
+    "did": {
+      "en": "DID",
+      "zh": "双重差分法 (因果政策评估模型) (Difference-in-differences 缩写)",
+      "abbr": "DID",
+      "category": "实证经济学/政策评估",
+      "otherLangs": {
+        "de": "Differenz-von-Differenzen-Ansatz"
+      }
+    },
+    "regression discontinuity design": {
+      "en": "Regression discontinuity design",
+      "zh": "断点回归设计",
+      "abbr": "RDD",
+      "category": "微观计量经济学/准实验设计",
+      "otherLangs": {
+        "de": "Regressions-Diskontinuitäts-Analyse"
+      }
+    },
+    "rdd": {
+      "en": "RDD",
+      "zh": "断点回归设计 (Regression discontinuity design 缩写)",
+      "abbr": "RDD",
+      "category": "微观计量经济学/准实验设计",
+      "otherLangs": {
+        "de": "Regressions-Diskontinuitäts-Analyse"
+      }
+    },
+    "vector autoregression": {
+      "en": "Vector autoregression",
+      "zh": "向量自回归模型",
+      "abbr": "VAR",
+      "category": "时间序列分析/宏观计量",
+      "otherLangs": {
+        "de": "Vektorautoregressives Modell"
+      }
+    },
+    "generalized method of moments": {
+      "en": "Generalized method of moments",
+      "zh": "广义矩估计",
+      "abbr": "GMM",
+      "category": "高级计量经济学/半参数估计",
+      "otherLangs": {
+        "de": "Verallgemeinerte Momentenmethode"
+      }
+    },
+    "gmm": {
+      "en": "GMM",
+      "zh": "广义矩估计 (Generalized method of moments 缩写)",
+      "abbr": "GMM",
+      "category": "高级计量经济学/半参数估计",
+      "otherLangs": {
+        "de": "Verallgemeinerte Momentenmethode"
+      }
+    },
+    "autoregressive conditional heteroskedasticity": {
+      "en": "Autoregressive conditional heteroskedasticity",
+      "zh": "自回归条件异方差模型",
+      "abbr": "ARCH / GARCH",
+      "category": "金融计量经济学/波动率建模",
+      "otherLangs": {
+        "de": "ARCH-Modell"
+      }
+    },
+    "arch / garch": {
+      "en": "ARCH / GARCH",
+      "zh": "自回归条件异方差模型 (Autoregressive conditional heteroskedasticity 缩写)",
+      "abbr": "ARCH / GARCH",
+      "category": "金融计量经济学/波动率建模",
+      "otherLangs": {
+        "de": "ARCH-Modell"
+      }
+    },
+    "cointegration": {
+      "en": "Cointegration",
+      "zh": "协整关系 (长期均衡平稳关系) (Cointegration 缩写)",
+      "abbr": "Cointegration",
+      "category": "时间序列分析/非平稳序列",
+      "otherLangs": {
+        "de": "Kointegration",
+        "fr": "cointégration"
+      }
+    },
+    "heteroskedasticity": {
+      "en": "Heteroskedasticity",
+      "zh": "异方差性 (Heteroskedasticity 缩写)",
+      "abbr": "Heteroskedasticity",
+      "category": "计量经济学/假设检验",
+      "otherLangs": {
+        "de": "Heteroskedastizität",
+        "fr": "hétéroscédasticité"
+      }
+    },
+    "endogeneity": {
+      "en": "Endogeneity",
+      "zh": "内生性问题 (遗漏变量、反向因果与测量误差) (Endogeneity 缩写)",
+      "abbr": "Endogeneity",
+      "category": "计量经济学/因果识别",
+      "otherLangs": {
+        "de": "Endogenität",
+        "fr": "endogénéité"
+      }
+    },
+    "stationarity": {
+      "en": "Stationarity",
+      "zh": "平稳性 (弱平稳与强平稳) (Stationarity 缩写)",
+      "abbr": "Stationarity",
+      "category": "时间序列分析/基本性质",
+      "otherLangs": {
+        "de": "Stationarität",
+        "fr": "stationnarité"
+      }
+    }
+  }
+}

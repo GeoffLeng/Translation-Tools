@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function runBuild() {
-  console.log('开始编译 Lite Translate 扩展...');
+  console.log('开始编译 Translate FY 扩展...');
 
   // 1. 编译页面 (popup, options, pdf_viewer)
   console.log('1. 编译用户界面页面...');

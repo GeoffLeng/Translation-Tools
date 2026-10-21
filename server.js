@@ -66,7 +66,47 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
 
-// 1. API: 批量翻译代理接口
+  // 1.0 API: 单句/划词翻译接口 (支持术语库直出与权威定名对齐)
+  if (pathname === '/api/translate' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        const { text, targetLang = 'zh-CN', persona = 'biochem' } = payload;
+        if (!text || typeof text !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'text 不能为空' }));
+          return;
+        }
+
+        // 优先精准命中权威学科术语库
+        if (targetLang === 'zh-CN' && text.trim().length <= 50 && !text.includes('\n')) {
+          const terms = loadAllTerms(persona);
+          const cleanKey = text.trim().toLowerCase();
+          if (terms[cleanKey]) {
+            const val = terms[cleanKey];
+            const zh = typeof val === 'object' ? (val.zh || val.translation) : val;
+            if (zh) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, translation: zh }));
+              return;
+            }
+          }
+        }
+
+        const trans = await translateWithGoogle(text, targetLang);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, translation: trans }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // 1. API: 批量翻译代理接口
   if (pathname === '/api/translate-batch' && req.method === 'POST') {
     let body = '';
     req.on('data', chunk => body += chunk);

@@ -183,6 +183,134 @@ export const DocStorage = {
   },
 
   /**
+   * 批量持久化全篇手绘批注与阅读笔记 (覆盖写入 IndexedDB)
+   */
+  async saveAllDrawings(docId, drawingsMap, meta = null) {
+    if (!docId) return;
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(['drawings', 'doc_meta'], 'readwrite');
+        const store = tx.objectStore('drawings');
+
+        if (drawingsMap && drawingsMap instanceof Map) {
+          drawingsMap.forEach((strokes, pageNum) => {
+            const key = `${docId}_p${pageNum}`;
+            if (strokes && strokes.length > 0) {
+              store.put(strokes, key);
+            } else {
+              store.delete(key);
+            }
+          });
+        }
+        // 保存成功后自动清理草稿快照
+        store.delete(`${docId}__draft`);
+
+        // 更新文献元数据
+        const metaStore = tx.objectStore('doc_meta');
+        const getReq = metaStore.get(docId);
+        getReq.onsuccess = () => {
+          const existing = getReq.result || {
+            id: docId,
+            title: (meta && meta.title) || '未命名文献',
+            createdAt: Date.now()
+          };
+          existing.updatedAt = Date.now();
+          existing.lastSavedAt = Date.now();
+          if (meta && meta.title) existing.title = meta.title;
+          if (meta && meta.numPages) existing.numPages = meta.numPages;
+          metaStore.put(existing);
+        };
+
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = (e) => reject(e);
+      });
+    } catch (err) {
+      console.warn('批量持久化批注失败:', err);
+    }
+  },
+
+  /**
+   * 自动保存未持久化的临时草稿快照 (用于意外崩溃与断电后恢复)
+   */
+  async saveDraft(docId, drawingsMap, meta = null) {
+    if (!docId) return;
+    try {
+      const db = await this.getDB();
+      const tx = db.transaction('drawings', 'readwrite');
+      const store = tx.objectStore('drawings');
+      const draftList = [];
+      if (drawingsMap && drawingsMap instanceof Map) {
+        drawingsMap.forEach((strokes, p) => {
+          if (strokes && strokes.length > 0) {
+            draftList.push([p, strokes]);
+          }
+        });
+      }
+      if (draftList.length === 0) {
+        store.delete(`${docId}__draft`);
+      } else {
+        store.put({
+          docId,
+          timestamp: Date.now(),
+          drawings: draftList,
+          title: meta?.title || '',
+          numPages: meta?.numPages || 0
+        }, `${docId}__draft`);
+      }
+    } catch (err) {
+      console.warn('保存草稿快照失败:', err);
+    }
+  },
+
+  /**
+   * 读取临时草稿快照
+   */
+  async loadDraft(docId) {
+    if (!docId) return null;
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const tx = db.transaction('drawings', 'readonly');
+        const store = tx.objectStore('drawings');
+        const req = store.get(`${docId}__draft`);
+        req.onsuccess = () => {
+          const val = req.result;
+          if (val && Array.isArray(val.drawings)) {
+            const map = new Map();
+            val.drawings.forEach(([p, strokes]) => map.set(p, strokes));
+            resolve({
+              timestamp: val.timestamp,
+              drawings: map,
+              title: val.title,
+              numPages: val.numPages
+            });
+          } else {
+            resolve(null);
+          }
+        };
+        req.onerror = () => resolve(null);
+      });
+    } catch (err) {
+      return null;
+    }
+  },
+
+  /**
+   * 清除临时草稿快照 (在正常保存或明确放弃后调用)
+   */
+  async clearDraft(docId) {
+    if (!docId) return;
+    try {
+      const db = await this.getDB();
+      const tx = db.transaction('drawings', 'readwrite');
+      tx.objectStore('drawings').delete(`${docId}__draft`);
+    } catch (err) {
+      console.warn('清除草稿快照失败:', err);
+    }
+  },
+
+  /**
    * 删除单页手绘批注
    */
   async deleteDrawing(docId, pageNum) {
@@ -245,10 +373,11 @@ export const DocStorage = {
         const transStore = tx.objectStore('translations');
         const metaStore = tx.objectStore('doc_meta');
 
-        // 更新最后访问时间
+        // 更新最后访问时间并记录上次保存时间戳
         const mReq = metaStore.get(docId);
         mReq.onsuccess = () => {
           if (mReq.result) {
+            res.lastSavedAt = mReq.result.lastSavedAt || 0;
             mReq.result.updatedAt = Date.now();
             metaStore.put(mReq.result);
           }

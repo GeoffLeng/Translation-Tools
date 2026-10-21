@@ -68,6 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalManualAddModelBtn = document.getElementById('modal-manual-add-model-btn');
   const modalModelPicker = document.getElementById('modal-model-picker');
   const modalPickerSummary = document.getElementById('modal-picker-summary');
+  const modalToggleSelectAllBtn = document.getElementById('modal-toggle-select-all-btn');
+  const modalToggleSelectAllText = document.getElementById('modal-toggle-select-all-text');
   const modalClearSelectedBtn = document.getElementById('modal-clear-selected-btn');
   const modalPickerList = document.getElementById('modal-picker-list');
   const modalCustomAlias = document.getElementById('modal-custom-alias');
@@ -263,6 +265,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       listEl.appendChild(row);
     });
+
+    // 3. 同步“全选 / 取消全选”按钮状态
+    const toggleAllBtn = document.querySelector(`.toggle-select-all-models-btn[data-provider="${provider}"]`);
+    if (toggleAllBtn) {
+      const isAllSelected = state.all.length > 0 && state.all.every(m => enabledSet.has(m));
+      const textEl = toggleAllBtn.querySelector('.select-all-text');
+      if (textEl) textEl.textContent = isAllSelected ? '取消全选' : '全选';
+      toggleAllBtn.classList.toggle('is-all-selected', isAllSelected);
+      toggleAllBtn.title = isAllSelected ? '点击取消全选' : '点击全选所有模型';
+    }
   }
 
   // 发起获取服务商模型列表
@@ -318,8 +330,14 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchedModels.forEach(m => {
         const id = typeof m === 'string' ? m : m.id;
         if (!state.all.includes(id)) state.all.push(id);
-        if (!state.enabled.includes(id)) state.enabled.push(id);
       });
+
+      // 默认非全选：仅保留当前下拉框已选中的默认活跃模型，不自动勾选全部模型
+      const selectEl = document.getElementById(`${provider}-model`);
+      const currentActive = (selectEl && selectEl.value) || (state.enabled && state.enabled[0]) || state.all[0];
+      if (!state.enabled || state.enabled.length === 0) {
+        state.enabled = currentActive ? [currentActive] : [];
+      }
 
       if (statusText) {
         statusText.textContent = `获取成功，共 ${fetchedModels.length} 个模型（已更新）`;
@@ -355,6 +373,33 @@ document.addEventListener('DOMContentLoaded', () => {
       if (panel) {
         panel.classList.toggle('hidden');
       }
+    });
+  });
+
+  // 绑定“全选 / 取消全选”按钮点击切换
+  document.querySelectorAll('.toggle-select-all-models-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const provider = btn.getAttribute('data-provider');
+      const state = providerState[provider];
+      if (!state || !state.all || state.all.length === 0) return;
+      const selectEl = document.getElementById(`${provider}-model`);
+      const isAllSelected = state.all.every(m => state.enabled.includes(m));
+
+      if (isAllSelected) {
+        // 再次点击取消全选：仅保留当前活跃/默认模型，防止可用模型全部为空
+        const defaultM = (selectEl && selectEl.value) || state.all[0];
+        state.enabled = defaultM ? [defaultM] : [];
+      } else {
+        // 点击全选：启用服务商下全部模型
+        state.enabled = [...state.all];
+      }
+
+      const saveObj = {};
+      saveObj[`${provider}Models`] = state.enabled;
+      chrome.storage.local.set(saveObj, () => {
+        renderProviderModelUI(provider, selectEl ? selectEl.value : null);
+        renderDefaultEngineOptions();
+      });
     });
   });
 
@@ -768,7 +813,19 @@ document.addEventListener('DOMContentLoaded', () => {
       emptyTip.className = 'picker-empty-tip';
       emptyTip.textContent = `未搜索到匹配模型。点击右上角“+ 添加”可直接添加 “${query}” 为自定义 ID`;
       modalPickerList.appendChild(emptyTip);
+      if (modalToggleSelectAllBtn && modalToggleSelectAllText) {
+        modalToggleSelectAllText.textContent = '全选';
+        modalToggleSelectAllBtn.classList.remove('is-all-selected');
+      }
       return;
+    }
+
+    // 动态同步弹窗模型选择器的“全选 / 取消全选”状态
+    if (modalToggleSelectAllBtn && modalToggleSelectAllText) {
+      const isAllSelected = filtered.length > 0 && filtered.every(m => selectedModelMap.has(m.id));
+      modalToggleSelectAllText.textContent = isAllSelected ? '取消全选' : '全选';
+      modalToggleSelectAllBtn.classList.toggle('is-all-selected', isAllSelected);
+      modalToggleSelectAllBtn.title = isAllSelected ? '点击取消全选' : '点击全选模型';
     }
 
     // 默认未输入搜索词时展示前 80 项，有搜索词展示前 50 项
@@ -842,6 +899,32 @@ document.addEventListener('DOMContentLoaded', () => {
   if (modalClearSelectedBtn) {
     modalClearSelectedBtn.addEventListener('click', () => {
       selectedModelMap.clear();
+      updateSelectedUI();
+      renderModelPicker(modalModelName ? modalModelName.value.trim() : '');
+    });
+  }
+
+  // 弹窗模型选择器：一键全选 / 取消全选切换
+  if (modalToggleSelectAllBtn) {
+    modalToggleSelectAllBtn.addEventListener('click', () => {
+      if (!modalFetchedModels || modalFetchedModels.length === 0) return;
+      const q = modalModelName ? modalModelName.value.trim().toLowerCase() : '';
+      const targetList = q
+        ? modalFetchedModels.filter(m => (m.id && m.id.toLowerCase().includes(q)) || (m.name && m.name.toLowerCase().includes(q)))
+        : modalFetchedModels;
+
+      if (targetList.length === 0) return;
+
+      const isAllSelected = targetList.every(m => selectedModelMap.has(m.id));
+
+      if (isAllSelected) {
+        // 再次点击：取消全选
+        targetList.forEach(m => selectedModelMap.delete(m.id));
+      } else {
+        // 点击全选：全量添加当前模型列表
+        targetList.forEach(m => selectedModelMap.set(m.id, { id: m.id, name: m.name || m.id }));
+      }
+
       updateSelectedUI();
       renderModelPicker(modalModelName ? modalModelName.value.trim() : '');
     });

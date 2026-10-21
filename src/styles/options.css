@@ -685,6 +685,48 @@ input:checked + .slider:before {
   color: #64748b;
 }
 
+.toggle-select-all-models-btn,
+.picker-select-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(0, 122, 255, 0.08);
+  color: #007AFF;
+  border: 1px solid rgba(0, 122, 255, 0.22);
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.toggle-select-all-models-btn:hover,
+.picker-select-all-btn:hover {
+  background: rgba(0, 122, 255, 0.15);
+  border-color: rgba(0, 122, 255, 0.38);
+}
+
+.toggle-select-all-models-btn:active,
+.picker-select-all-btn:active {
+  transform: scale(0.96);
+}
+
+.toggle-select-all-models-btn.is-all-selected,
+.picker-select-all-btn.is-all-selected {
+  background: #007AFF;
+  color: #ffffff;
+  border-color: #007AFF;
+}
+
+.toggle-select-all-models-btn.is-all-selected:hover,
+.picker-select-all-btn.is-all-selected:hover {
+  background: #0062cc;
+  border-color: #0062cc;
+}
+
 .modal-picker-list {
   max-height: 180px;
   overflow-y: auto;

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>Lite Translate - PDF 沉浸式双语对照翻译</title>
+  <title>Translate FY - PDF 沉浸式双语对照翻译</title>
   <link rel="stylesheet" href="/src/styles/pdf_viewer.css">
 </head>
 <body>
@@ -12,18 +12,18 @@
       <div class="header-top-left">
         <div class="brand-item">
           <img src="/icons/icon.svg" class="top-logo" alt="logo">
-          <span class="top-brand-name">Lite Translate</span>
+          <span class="top-brand-name">Translate FY</span>
         </div>
         <div class="divider-v"></div>
         <div class="service-group">
-          <label class="service-label" for="pdf-translate-engine">Translation Services:</label>
+          <label class="service-label" for="pdf-translate-engine">翻译引擎:</label>
           <select id="pdf-translate-engine" class="top-select" title="选择翻译引擎">
             <option value="google">谷歌翻译</option>
           </select>
           <select id="pdf-translate-model" class="top-select hidden" title="选择具体 AI 模型"></select>
         </div>
         <div class="service-group">
-          <label class="service-label" for="target-language-select">Target Language:</label>
+          <label class="service-label" for="target-language-select">目标语言:</label>
           <select id="target-language-select" class="top-select" title="选择目标语言">
             <option value="zh-CN">Simplified Chinese (简体中文)</option>
             <option value="zh-TW">Traditional Chinese (繁体中文)</option>
@@ -39,20 +39,63 @@
       </div>
 
       <div class="header-top-right">
-        <label for="file-input" class="top-action-btn outline-btn" id="new-doc-btn" data-tooltip-title="打开新文档" data-tooltip-desc="选择或上传本地 PDF 文件进行深度双语精读与排版翻译">
+        <label for="file-input" class="top-action-btn outline-btn" id="new-doc-btn" title="选择本地 PDF 文件进行深度双语精读与排版翻译">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="11" x2="12" y2="17"></line><line x1="9" y1="14" x2="15" y2="14"></line></svg>
           <span>New</span>
         </label>
         <input type="file" id="file-input" accept=".pdf" class="hidden-input">
 
-        <button id="translate-doc-btn" class="top-action-btn highlight-btn" disabled data-tooltip-title="一键全文翻译" data-tooltip-desc="批量排版翻译整篇文档全部页面，支持生成并导出双语网页与PDF">
+        <!-- 显式保存笔记按钮组 (支持一键保存与下拉另存为带批注的PDF/HTML/TXT) -->
+        <div class="save-split-btn-group" id="save-split-group">
+          <button id="save-doc-btn" class="top-action-btn outline-btn save-main-btn" disabled title="保存当前文档全部手绘批注与笔记到本地 (Ctrl+S)">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            <span>Save</span>
+            <span id="unsaved-dot" class="unsaved-indicator-dot hidden" title="有未保存的笔记"></span>
+          </button>
+          <button id="save-arrow-btn" class="save-arrow-btn" disabled title="更多保存与导出选项 (另存为PDF/HTML/TXT)">
+            <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </button>
+          <!-- 悬浮保存与导出菜单 -->
+          <div id="save-dropdown-menu" class="save-dropdown-menu hidden">
+            <div class="save-menu-item" id="menu-save-local">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563EB" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              <div class="save-menu-text">
+                <strong>保存到本地笔记 (Ctrl+S)</strong>
+                <span>离线持久化存储，重开文档原样恢复</span>
+              </div>
+            </div>
+            <div class="save-menu-item" id="menu-export-pdf">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#059669" stroke-width="2"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+              <div class="save-menu-text">
+                <strong>打印 / 另存为带批注的 PDF</strong>
+                <span id="menu-export-pdf-desc">包含手绘笔迹、高光与原文，支持自选范围</span>
+              </div>
+            </div>
+            <div class="save-menu-item" id="menu-export-bilingual">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#7C3AED" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              <div class="save-menu-text">
+                <strong>导出双语对照笔记 (HTML)</strong>
+                <span>左右双语对照排版、公式高保真</span>
+              </div>
+            </div>
+            <div class="save-menu-item" id="menu-export-txt">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#6B7280" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="10" y1="12" x2="14" y2="12"></line><line x1="10" y1="16" x2="14" y2="16"></line></svg>
+              <div class="save-menu-text">
+                <strong>导出纯中文文本 (.txt)</strong>
+                <span>纯净翻译分段，适合导入笔记软件</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button id="translate-doc-btn" class="top-action-btn highlight-btn" disabled title="批量排版翻译整篇文档全部页面">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           <span>Translate All & Download</span>
         </button>
 
-        <button id="advanced-trans-btn" class="top-action-btn purple-btn" data-tooltip-title="高级翻译设置" data-tooltip-desc="微调专业术语遮罩、滑动窗口断句、翻译排版覆盖样式与大模型参数">
+        <button id="advanced-trans-btn" class="top-action-btn purple-btn" title="微调专业术语遮罩、滑动窗口断句、翻译排版覆盖样式与大模型参数">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-          <span>Advanced Translation</span>
+          <span>高级选项</span>
         </button>
       </div>
     </header>
@@ -61,28 +104,28 @@
     <nav class="viewer-header-sub" id="viewer-header-sub">
       <div class="header-sub-left">
         <!-- 页面缩略图侧边栏展开/收起 -->
-        <button id="toggle-sidebar-btn" class="sub-tool-btn" data-tooltip-title="缩略图侧边栏" data-tooltip-desc="展开或收起左侧页面缩略图导航目录，快速定位特定页面">
+        <button id="toggle-sidebar-btn" class="sub-tool-btn" title="缩略图侧边栏">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
         </button>
 
         <!-- 翻页控制器: < 2 / 118 > -->
-        <div class="page-nav-pill" data-tooltip-title="翻页导航" data-tooltip-desc="翻阅页面 (支持快捷键 PageUp / PageDown 或键盘方向键)" data-tooltip-shortcut="PageUp/Down">
-          <button id="prev-page" class="nav-arrow-btn" disabled data-tooltip-title="上一页" data-tooltip-desc="翻至上一页">‹</button>
-          <input type="number" id="page-num" value="1" min="1" class="page-num-box" data-tooltip-title="当前页码" data-tooltip-desc="直接输入页码按回车快速跳转">
+        <div class="page-nav-pill">
+          <button id="prev-page" class="nav-arrow-btn" disabled title="上一页">‹</button>
+          <input type="number" id="page-num" value="1" min="1" class="page-num-box" title="当前页码">
           <span class="page-divider">/</span>
           <span id="page-count" class="page-total-label">0</span>
-          <button id="next-page" class="nav-arrow-btn" disabled data-tooltip-title="下一页" data-tooltip-desc="翻至下一页">›</button>
+          <button id="next-page" class="nav-arrow-btn" disabled title="下一页">›</button>
         </div>
 
         <div class="divider-sub"></div>
 
         <!-- 工具按钮组 -->
-        <button id="search-tool-btn" class="sub-tool-btn with-text" data-tooltip-title="文档搜索" data-tooltip-desc="在 PDF 全文中检索关键字并高亮匹配位置" data-tooltip-shortcut="Ctrl+F">
+        <button id="search-tool-btn" class="sub-tool-btn with-text" title="文档搜索 (Ctrl+F)">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           <span>Search</span>
         </button>
 
-        <button id="text-tool-btn" class="sub-tool-btn with-text active" data-tooltip-title="文本选择模式" data-tooltip-desc="鼠标划选原文段落，自动弹出悬浮翻译气泡">
+        <button id="text-tool-btn" class="sub-tool-btn with-text active" title="文本选择模式">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>
           <span>Text</span>
         </button>
@@ -91,7 +134,7 @@
         <div class="ink-tools-cluster" id="ink-tools-cluster">
           <!-- 1. 普通画笔 (带颜色指示与下拉属性微调) -->
           <div class="ink-split-btn-group" id="pen-split-group">
-            <button id="draw-tool-btn" class="sub-tool-btn ink-main-btn" data-tooltip-title="画笔 (绘制)" data-tooltip-desc="手绘标记、重点圈画，支持 30 种色彩与粗细调节">
+            <button id="draw-tool-btn" class="sub-tool-btn ink-main-btn" title="画笔 (绘制)">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"></path><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path></svg>
               <span>绘制</span>
               <span class="ink-color-indicator" id="pen-color-indicator" style="background-color: #0078D4;"></span>
@@ -103,7 +146,7 @@
 
           <!-- 2. 荧光笔 (高光半透明强调) -->
           <div class="ink-split-btn-group" id="highlighter-split-group">
-            <button id="highlighter-tool-btn" class="sub-tool-btn ink-main-btn" data-tooltip-title="高光荧光笔" data-tooltip-desc="半透明荧光高亮强调，突出重点且不遮挡文字">
+            <button id="highlighter-tool-btn" class="sub-tool-btn ink-main-btn" title="高光荧光笔">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 11-6 6v3h3l6-6m-3-3 7-7 3 3-7 7m-3-3 3 3"></path><line x1="18" y1="2" x2="22" y2="6"></line></svg>
               <span>高光</span>
               <span class="ink-color-indicator" id="highlighter-color-indicator" style="background-color: #FFF176;"></span>
@@ -114,27 +157,30 @@
           </div>
 
           <!-- 3. 橡皮擦 (整笔笔画擦除) -->
-          <button id="eraser-tool-btn" class="sub-tool-btn with-text" data-tooltip-title="橡皮擦" data-tooltip-desc="点击或滑过笔画即可整笔擦除">
+          <button id="eraser-tool-btn" class="sub-tool-btn with-text" title="橡皮擦">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path><path d="M22 21H7"></path><path d="m5 11 9 9"></path></svg>
             <span>擦除</span>
           </button>
         </div>
 
-        <!-- 批注辅助工具组 (仅在画笔/高光模式下显示：撤销最后一笔与清空本页) -->
+        <!-- 批注辅助工具组 (仅在画笔/高光模式下显示：保存、撤销最后一笔与清空本页) -->
         <div id="draw-actions-group" class="draw-actions-group hidden">
-          <button id="draw-undo-btn" class="sub-tool-btn with-text compact-btn" data-tooltip-title="撤销批注" data-tooltip-desc="撤销当前页最后一笔手绘涂鸦" data-tooltip-shortcut="Ctrl+Z">
+          <button id="draw-save-btn" class="sub-tool-btn with-text compact-btn" title="保存手绘批注 (Ctrl+S)">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            <span>保存</span>
+          </button>
+          <button id="draw-undo-btn" class="sub-tool-btn with-text compact-btn" title="撤销批注 (Ctrl+Z)">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path></svg>
             <span>撤销</span>
           </button>
-          <button id="draw-clear-btn" class="sub-tool-btn with-text compact-btn" data-tooltip-title="清空本页批注" data-tooltip-desc="一键清除当前页面上的全部手绘笔迹">
+          <button id="draw-clear-btn" class="sub-tool-btn with-text compact-btn" title="清空本页批注">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             <span>清空</span>
           </button>
         </div>
 
-        <!-- 对照模式切换 (Control Style) -->
-        <div class="control-style-group" data-tooltip-title="双语排版模式" data-tooltip-desc="切换版式：Bilingual(双语左右对照)、Original(纯原文)、Translation(纯译文)">
-          <span class="sub-label">Control Style</span>
+        <!-- 对照模式切换 (删除 Control Style 冗余文本) -->
+        <div class="control-style-group" title="双语排版模式">
           <select id="control-style-select" class="sub-select-inline">
             <option value="bilingual">Bilingual (双语对照)</option>
             <option value="original">Original (仅原文)</option>
@@ -143,7 +189,7 @@
         </div>
 
         <!-- 缩放控制下拉与微调 -->
-        <div class="zoom-controller" data-tooltip-title="页面缩放比例" data-tooltip-desc="调节 PDF 阅读缩放比例：适合页宽、适合整页或指定缩放百分比">
+        <div class="zoom-controller" title="页面缩放比例">
           <select id="zoom-preset-select" class="sub-select-inline">
             <option value="fit-width">适合页宽</option>
             <option value="fit-page">适合整页</option>
@@ -153,51 +199,51 @@
             <option value="1.5">150%</option>
             <option value="2.0">200%</option>
           </select>
-          <button id="zoom-out" class="zoom-stepper-btn" data-tooltip-title="缩小" data-tooltip-desc="以 10% 步长缩小显示比例">-</button>
+          <button id="zoom-out" class="zoom-stepper-btn" title="缩小">-</button>
           <span id="zoom-value" class="zoom-readout">120%</span>
-          <button id="zoom-in" class="zoom-stepper-btn" data-tooltip-title="放大" data-tooltip-desc="以 10% 步长放大显示比例">+</button>
+          <button id="zoom-in" class="zoom-stepper-btn" title="放大">+</button>
         </div>
       </div>
 
       <div class="header-sub-right">
-        <!-- 学术与翻译专家角色切换器 -->
-        <div class="persona-select-group" data-tooltip-title="学术翻译角色切换" data-tooltip-desc="切换翻译角色：默认大众翻译不加载专业词库；生化专家挂载3105权威生化词库与CAS保护；经济学专家挂载宏微观与量化金融词典">
+        <!-- 学术与翻译专家角色切换器 (唯一保留智能功能标注) -->
+        <div class="persona-select-group" data-tooltip-persona="true" data-tooltip-title="学术翻译角色体系" data-tooltip-desc="根据专业领域挂载权威词库与高标准提示词">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M12 2l9 4.9V17L12 22 3 17V6.9z"></path><path d="M12 22V12"></path><path d="M12 12L3 6.9"></path><path d="M12 12l9-5.1"></path></svg>
           <span class="sub-label">角色</span>
           <select id="persona-select" class="sub-select-inline persona-select-box">
-            <option value="general">默认通用 (大众顺畅)</option>
-            <option value="biochem" selected>生化学术 (3105词库)</option>
-            <option value="economics">经济金融 (AER顶刊)</option>
+            <option value="general">默认通用翻译</option>
+            <option value="biochem" selected>生化学术专家</option>
+            <option value="economics">经济学专家</option>
           </select>
         </div>
 
         <!-- 单页排版翻译按钮 -->
-        <button id="translate-page-btn" class="sub-tool-btn with-text primary-action" disabled data-tooltip-title="翻译当前页" data-tooltip-desc="即时对当前展示的单页进行深度双语排版翻译" data-tooltip-shortcut="Alt+P">
+        <button id="translate-page-btn" class="sub-tool-btn with-text primary-action" disabled title="翻译当前页 (Alt+P)">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
           <span>翻译当前页</span>
         </button>
 
-        <!-- 选页范围翻译按钮 (沉浸式翻译同款高效精读) -->
-        <button id="translate-range-btn" class="sub-tool-btn with-text primary-action" disabled data-tooltip-title="选页范围翻译" data-tooltip-desc="指定页码区间（如 1-5, 8, 12-20）快速按需批量精读">
+        <!-- 选页范围翻译按钮 -->
+        <button id="translate-range-btn" class="sub-tool-btn with-text primary-action" disabled title="选页范围翻译">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span>选页翻译</span>
         </button>
 
-        <span id="trans-active-badge" class="trans-status-pill" data-tooltip-title="页面翻译状态" data-tooltip-desc="显示当前页面的翻译状态（未翻译 / 正在翻译 / 混合分流完成）">未翻译</span>
+        <span id="trans-active-badge" class="trans-status-pill">未翻译</span>
 
-        <button id="setup-btn" class="sub-tool-btn with-text" data-tooltip-title="扩展设置中心" data-tooltip-desc="配置翻译服务商、API Key、自定义模型与提示词">
+        <button id="setup-btn" class="sub-tool-btn with-text" title="扩展设置中心">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
           <span>Setup</span>
         </button>
 
         <!-- 回到首页顶部按钮 -->
-        <button id="top-back-btn" class="sub-tool-btn with-text" data-tooltip-title="回到顶部" data-tooltip-desc="一键平滑滚动返回文档第一页封面">
+        <button id="top-back-btn" class="sub-tool-btn with-text" title="回到顶部">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"></polyline></svg>
           <span>回到顶部</span>
         </button>
 
         <!-- 全屏沉浸模式按钮 -->
-        <button id="hide-top-btn" class="sub-tool-btn with-text" data-tooltip-title="全屏沉浸阅读" data-tooltip-desc="隐藏顶部所有工具栏，享受纯净无干扰的全屏阅读" data-tooltip-shortcut="Esc退出">
+        <button id="hide-top-btn" class="sub-tool-btn with-text" title="全屏沉浸阅读 (Esc退出)">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
           <span>全屏</span>
         </button>
@@ -224,26 +270,36 @@
 
       <!-- Main Dual PDF Canvas Workspace -->
       <main class="viewer-main" id="viewer-main">
-        <!-- Welcome Screen: 拖入或打开文件 -->
+        <!-- Welcome Screen: 拖入或打开文件 (极简 iOS 纯净质感) -->
         <div class="welcome-screen" id="welcome-screen">
           <div class="welcome-box">
             <div class="welcome-icon">
               <svg xmlns="http://www.w3.org/2000/svg" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line><line x1="9" y1="11" x2="15" y2="11"></line><line x1="9" y1="19" x2="13" y2="19"></line></svg>
             </div>
             <h2>开启 PDF 原排版双语对照翻译</h2>
-            <p>1:1 还原【沉浸式翻译】排版视觉与双栏对照。点击右上角“New”或将 PDF 直接拖入此窗口即可开始阅读与翻译。</p>
             <div class="welcome-actions">
               <label for="welcome-file-input" class="welcome-upload-btn">
                 <span>选择本地 PDF 文件</span>
               </label>
               <input type="file" id="welcome-file-input" accept=".pdf" class="hidden-input">
             </div>
-            <div class="welcome-features">
-              <div class="feat-badge">✓ 原版排版 1:1 克隆</div>
-              <div class="feat-badge">✓ 公式与图表智能保护</div>
-              <div class="feat-badge">✓ 连字断词无损修复</div>
-              <div class="feat-badge">✓ 离线双语对照导出</div>
+          </div>
+        </div>
+
+        <!-- 自动草稿快照崩溃恢复横幅 (Auto-Draft Recovery Banner) -->
+        <div id="draft-recovery-banner" class="draft-recovery-banner hidden">
+          <div class="draft-banner-content">
+            <div class="draft-banner-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#d97706" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             </div>
+            <div class="draft-banner-text">
+              <strong id="draft-banner-title">检测到未保存的历史草稿</strong>
+              <span id="draft-banner-desc">该文档包含上次关闭前自动保存的未归档批注草稿。是否恢复？</span>
+            </div>
+          </div>
+          <div class="draft-banner-actions">
+            <button id="btn-draft-discard" class="draft-btn outline">放弃草稿</button>
+            <button id="btn-draft-restore" class="draft-btn primary">恢复草稿</button>
           </div>
         </div>
 
@@ -411,6 +467,93 @@
       </div>
     </div>
 
+    <!-- 未保存笔记确认提醒弹窗 (Unsaved Notes Modal) -->
+    <div id="unsaved-notes-modal" class="advanced-modal-overlay hidden">
+      <div class="advanced-modal-box" style="max-width: 480px;">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #1e293b;">未保存的笔记提醒</h3>
+          </div>
+          <button id="close-unsaved-modal-btn" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body" style="padding: 18px 22px 22px;">
+          <p id="unsaved-modal-desc" style="font-size: 13.5px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
+            当前文档含有未保存的手绘批注与阅读笔记。打开新文档前，是否需要保存现在的笔记？
+          </p>
+
+          <div class="modal-actions-row" style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button id="btn-unsaved-cancel" class="modal-action-btn" style="padding: 7px 16px;">取消</button>
+            <button id="btn-unsaved-discard" class="modal-action-btn" style="padding: 7px 16px; border-color: #ef4444; color: #ef4444;">不保存</button>
+            <button id="btn-unsaved-save" class="modal-action-btn primary" style="padding: 7px 18px;">保存并打开</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导出带批注 PDF 页码范围选择模态框 (Export Annotated PDF Range Modal) -->
+    <div id="export-pdf-modal" class="advanced-modal-overlay hidden">
+      <div class="advanced-modal-box" style="max-width: 520px;">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#059669" stroke-width="2"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #1e293b;">打印 / 另存为带批注的 PDF</h3>
+          </div>
+          <button id="close-export-pdf-modal-btn" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body" style="padding: 16px 22px 22px;">
+          <p style="font-size: 13px; color: #64748b; margin: 0 0 16px; line-height: 1.5;">
+            系统将对选定页面进行高清图层复合（合并原始文档内容与手写、高光墨迹），并调起系统打印或另存为 PDF。请选择导出范围：
+          </p>
+
+          <div class="export-range-options" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+            <label class="range-option-label" id="label-export-current">
+              <input type="radio" name="export-pdf-range" value="current" checked>
+              <div style="flex: 1;">
+                <span style="font-size: 13.5px; font-weight: 600; color: #1e293b;">仅当前页</span>
+                <span id="export-pdf-current-desc" style="font-size: 12px; color: #64748b; margin-left: 6px;">(第 1 页)</span>
+              </div>
+            </label>
+
+            <label class="range-option-label" id="label-export-annotated">
+              <input type="radio" name="export-pdf-range" value="annotated">
+              <div style="flex: 1;">
+                <span style="font-size: 13.5px; font-weight: 600; color: #1e293b;">仅含批注的页面</span>
+                <span id="export-pdf-annotated-desc" style="font-size: 12px; color: #059669; margin-left: 6px;">(共 0 页)</span>
+              </div>
+            </label>
+
+            <label class="range-option-label" id="label-export-all">
+              <input type="radio" name="export-pdf-range" value="all">
+              <div style="flex: 1;">
+                <span style="font-size: 13.5px; font-weight: 600; color: #1e293b;">全部页面</span>
+                <span id="export-pdf-all-desc" style="font-size: 12px; color: #64748b; margin-left: 6px;">(共 1 页)</span>
+              </div>
+            </label>
+
+            <label class="range-option-label" id="label-export-custom">
+              <input type="radio" name="export-pdf-range" value="custom">
+              <div style="flex: 1; display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 13.5px; font-weight: 600; color: #1e293b;">自定义范围</span>
+                <input type="text" id="export-pdf-custom-input" placeholder="例如: 1-5, 8, 11-14" style="margin-left: 8px; padding: 4px 10px; font-size: 12.5px; border: 1px solid #cbd5e1; border-radius: 6px; width: 170px;">
+              </div>
+            </label>
+          </div>
+
+          <div id="export-pdf-summary" style="font-size: 12.5px; color: #2563eb; background: #eff6ff; padding: 8px 12px; border-radius: 6px; margin-bottom: 18px;">
+            预计导出 1 页
+          </div>
+
+          <div class="modal-actions-row" style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button id="btn-export-pdf-cancel" class="modal-action-btn" style="padding: 7px 16px;">取消</button>
+            <button id="btn-export-pdf-confirm" class="modal-action-btn primary" style="padding: 7px 18px; background: #059669; border-color: #059669;">开始合成并打印</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 极简全局轻量 Toast 提示框 (用于复制、快捷键、翻译完成通知) -->
     <div id="pdf-toast" class="pdf-toast hidden"></div>
 
@@ -420,7 +563,7 @@
         <div class="modal-header">
           <div class="modal-title-group">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#7C3AED" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-            <h3>Advanced Translation · 高级排版选项</h3>
+            <h3>高级选项</h3>
           </div>
           <button id="close-advanced-modal-btn" class="modal-close-btn">✕</button>
         </div>
@@ -428,14 +571,19 @@
         <div class="modal-body">
           <div class="modal-item">
             <div class="item-text">
-              <strong>专业学术翻译角色 (Translation Persona)</strong>
+              <strong>专业翻译角色</strong>
               <p>切换翻译专家体系：挂载专有学术提示词与本地专业语料库。默认通用翻译面向大众阅读，无需额外语料注入。</p>
             </div>
-            <select id="adv-persona-select" class="modal-select">
-              <option value="general">默认通用翻译 (大众通俗·流畅自然)</option>
-              <option value="biochem" selected>生化学术专家 (博士前沿·中国化学会标准)</option>
-              <option value="economics">经济学专家 (顶刊标准·量化与计量)</option>
-            </select>
+            <div class="persona-adv-row">
+              <select id="adv-persona-select" class="modal-select">
+                <option value="general">默认通用翻译</option>
+                <option value="biochem" selected>生化学术专家</option>
+                <option value="economics">经济学专家</option>
+              </select>
+              <button id="adv-edit-prompt-btn" class="ios-edit-prompt-btn" title="查看并自定义此角色的系统提示词" aria-label="修改提示词">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              </button>
+            </div>
           </div>
 
           <div class="modal-item">
@@ -481,6 +629,35 @@
         </div>
       </div>
     </div>
+
+    <!-- iOS 风格角色系统提示词微调模态框 (Persona System Prompt Editor Modal) -->
+    <div id="persona-prompt-modal" class="advanced-modal-overlay hidden">
+      <div class="advanced-modal-box prompt-modal-box">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#007AFF" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            <h3 id="prompt-modal-title">修改学术角色系统提示词</h3>
+          </div>
+          <button id="close-prompt-modal-btn" class="modal-close-btn">✕</button>
+        </div>
+
+        <div class="modal-body prompt-modal-body">
+          <p class="prompt-modal-guide">
+            自定义大模型学术 System Prompt。设定学科命名标准、术语消歧规则、计量表达规范与排版要求，点击“保存并生效”后即时应用于大模型翻译推理。
+          </p>
+          <div class="prompt-textarea-wrap">
+            <textarea id="persona-prompt-textarea" class="ios-prompt-textarea" rows="12" spellcheck="false" placeholder="在此输入自定义系统提示词..."></textarea>
+          </div>
+          <div class="prompt-modal-footer">
+            <button id="btn-restore-prompt" class="ios-btn-text" type="button">恢复默认提示词</button>
+            <div class="prompt-modal-actions">
+              <button id="btn-cancel-prompt" class="ios-btn-secondary" type="button">取消</button>
+              <button id="btn-save-prompt" class="ios-btn-primary" type="button">保存并生效</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 简洁智能功能解释小浮窗 (智能避让边界·高质感毛玻璃) -->
@@ -510,6 +687,19 @@
         <span class="ink-slider-label">细</span>
         <input type="range" id="ink-width-slider" min="1" max="24" value="3" class="ink-range-slider">
         <span class="ink-slider-label">粗</span>
+      </div>
+    </div>
+
+    <!-- 透明度控制区 (高光荧光笔专用透明度精细微调，10% - 100%) -->
+    <div class="ink-opacity-section" id="ink-opacity-section">
+      <div class="ink-width-header">
+        <span class="ink-popover-title">透明度</span>
+        <span class="ink-width-badge" id="ink-opacity-badge">35%</span>
+      </div>
+      <div class="ink-slider-row">
+        <span class="ink-slider-label">透</span>
+        <input type="range" id="ink-opacity-slider" min="10" max="100" value="35" step="5" class="ink-range-slider">
+        <span class="ink-slider-label">实</span>
       </div>
     </div>
   </div>

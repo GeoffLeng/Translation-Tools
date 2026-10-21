@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>Lite Translate - 设置</title>
+  <title>Translate FY - 设置</title>
   <link rel="stylesheet" href="/src/styles/options.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <img src="/icons/icon.svg" class="sidebar-logo" alt="logo">
-        <h2>Lite Translate</h2>
+        <h2>Translate FY</h2>
       </div>
       <nav class="sidebar-menu">
         <a href="#general" class="menu-item active" data-tab="general">通用设置</a>
@@ -117,6 +117,10 @@
                 <span id="glm-status" class="model-status-text"></span>
               </div>
               <div class="models-filter-bar">
+                <button type="button" class="toggle-select-all-models-btn" data-provider="glm" title="全选 / 取消全选">
+                  <svg class="select-all-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                  <span class="select-all-text">全选</span>
+                </button>
                 <input type="text" class="models-search-input" placeholder="搜索可用模型..." data-list="glm-checkbox-list">
                 <div class="models-manual-add">
                   <input type="text" id="glm-custom-model-input" placeholder="手动添加模型 ID" class="models-add-input">
@@ -291,12 +295,12 @@
 
       <!-- About Tab -->
       <section id="about-tab" class="tab-pane">
-        <h1 class="page-title">关于 Lite Translate</h1>
+        <h1 class="page-title">关于 Translate FY</h1>
         <div class="ios-card about-card">
           <div class="brand-large">
             <img src="/icons/icon.svg" class="logo-large" alt="logo">
-            <h3>Lite Translate</h3>
-            <span class="version-tag">Version 1.0.0</span>
+            <h3>Translate FY</h3>
+            <span class="version-tag">Version 1.0.1</span>
           </div>
           <p class="about-text">
             专注纯粹高效的极简划词翻译与 AI 智能查词工具。采用轻量 Shadow DOM 隔离与原生组件封装，保证完全零样式侵入，提供极速响应、优雅克制的划词翻译与长文档 PDF 沉浸式阅读体验。
@@ -371,7 +375,13 @@
         <div id="modal-model-picker" class="modal-model-picker hidden">
           <div class="modal-picker-header">
             <span id="modal-picker-summary">可用模型列表 (点击模型右侧“+ 添加”)</span>
-            <button type="button" id="modal-clear-selected-btn" style="font-size: 11px; cursor: pointer; border: none; background: none; color: #8e8e93;">清空已选</button>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button type="button" id="modal-toggle-select-all-btn" class="picker-select-all-btn" title="全选 / 取消全选">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+                <span id="modal-toggle-select-all-text">全选</span>
+              </button>
+              <button type="button" id="modal-clear-selected-btn" style="font-size: 11px; cursor: pointer; border: none; background: none; color: #8e8e93;">清空已选</button>
+            </div>
           </div>
           <div id="modal-picker-list" class="modal-picker-list"></div>
         </div>
