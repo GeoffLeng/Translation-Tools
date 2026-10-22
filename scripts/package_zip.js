@@ -39,7 +39,7 @@ try {
   const stat = fs.statSync(zipPath);
   console.log(`✅ 打包成功！最新版本: v${version}，文件大小: ${(stat.size / 1024).toFixed(1)} KB`);
   console.log(`📦 产物路径: ${zipPath}`);
-  console.log('💡 该 zip 包可直接分发给朋友解压安装，或在配置好 PNG 图标后直接上传至 Chrome 网上应用店！');
+  console.log('💡 该 zip 包可直接分发给朋友解压安装，已内置轻量化透明通道 PNG 图标！');
 } catch (e) {
   console.error('打包压缩失败:', e.message);
 }

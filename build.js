@@ -76,9 +76,12 @@ async function runBuild() {
   fs.copyFileSync('manifest.json', 'dist/manifest.json');
 
   if (!fs.existsSync('dist/icons')) {
-    fs.mkdirSync('dist/icons');
+    fs.mkdirSync('dist/icons', { recursive: true });
   }
-  fs.copyFileSync('icons/icon.svg', 'dist/icons/icon.svg');
+  const iconFiles = fs.readdirSync('icons');
+  for (const file of iconFiles) {
+    fs.copyFileSync(path.join('icons', file), path.join('dist/icons', file));
+  }
 
   console.log('5. 部署 PDF.js Worker...');
   // 拷贝 pdf.worker.mjs 或者是 pdf.worker.min.mjs 使得 PDF 渲染器能离线运行

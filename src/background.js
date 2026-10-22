@@ -84,7 +84,7 @@ if (chrome.webNavigation && chrome.webNavigation.onBeforeNavigate) {
             if (chrome.notifications) {
               chrome.notifications.create({
                 type: 'basic',
-                iconUrl: 'icons/icon.svg',
+                iconUrl: 'icons/icon-48.png',
                 title: 'Translate FY - 本地 PDF 阅读',
                 message: '如需自动接管本地 PDF 文件，请在扩展管理页面开启“允许访问文件网址”。'
               });
