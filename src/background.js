@@ -136,6 +136,22 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 
   registerContextMenus();
+
+  // 扩展更新或重载后，自动向当前已打开的普通网页标签页补齐注入 content.js，避免用户必须手动刷新页面
+  if (chrome.scripting && chrome.tabs) {
+    chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }, (tabs) => {
+      if (tabs && Array.isArray(tabs)) {
+        for (const t of tabs) {
+          if (t && t.id) {
+            chrome.scripting.executeScript({
+              target: { tabId: t.id },
+              files: ['content.js']
+            }).catch(() => {});
+          }
+        }
+      }
+    });
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -152,19 +168,43 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 // 右键菜单点击事件监听
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'translateSelection' && tab.id) {
+    const openPopupFallback = (text) => {
+      if (chrome.windows) {
+        chrome.windows.create({
+          url: chrome.runtime.getURL('popup.html') + '?text=' + encodeURIComponent(text || ''),
+          type: 'popup',
+          width: 420,
+          height: 480
+        });
+      }
+    };
+
     chrome.tabs.sendMessage(tab.id, {
       action: 'showSelectionTranslatePopup',
       text: info.selectionText
     }, () => {
-      // 若处于原生 PDF 等沙箱页面导致无法注入内容脚本，弹出微型独立查词窗兜底
       if (chrome.runtime.lastError) {
-        if (chrome.windows) {
-          chrome.windows.create({
-            url: chrome.runtime.getURL('popup.html') + '?text=' + encodeURIComponent(info.selectionText || ''),
-            type: 'popup',
-            width: 420,
-            height: 480
+        // 若当前标签页尚未注入 content.js (如刷新扩展后标签页未重载)，尝试动态注入并重发
+        if (chrome.scripting && chrome.scripting.executeScript && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://')) {
+          chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js']
+          }).then(() => {
+            setTimeout(() => {
+              chrome.tabs.sendMessage(tab.id, {
+                action: 'showSelectionTranslatePopup',
+                text: info.selectionText
+              }, () => {
+                if (chrome.runtime.lastError) {
+                  openPopupFallback(info.selectionText);
+                }
+              });
+            }, 80);
+          }).catch(() => {
+            openPopupFallback(info.selectionText);
           });
+        } else {
+          openPopupFallback(info.selectionText);
         }
       }
     });
@@ -484,13 +524,46 @@ function unmaskNumericEntities(translatedText, tokenMap) {
 }
 
 // 3. AI 翻译服务逻辑
+const GLOBAL_LANG_NAME_MAP = {
+  'zh-CN': '中文(简体)',
+  'zh-TW': '中文(繁体)',
+  'en': '英语 (English)',
+  'ja': '日语 (Japanese)',
+  'ko': '韩语 (Korean)',
+  'fr': '法语 (French)',
+  'de': '德语 (German)',
+  'es': '西班牙语 (Spanish)',
+  'ru': '俄语 (Russian)',
+  'it': '意大利语 (Italian)',
+  'pt': '葡萄牙语 (Portuguese)',
+  'ar': '阿拉伯语 (Arabic)',
+  'vi': '越南语 (Vietnamese)',
+  'th': '泰语 (Thai)',
+  'nl': '荷兰语 (Dutch)',
+  'pl': '波兰语 (Polish)'
+};
+
+function isChineseLang(targetLang) {
+  if (!targetLang) return true;
+  return targetLang === 'zh' || targetLang === 'zh-CN' || targetLang === 'zh-TW';
+}
+
+function isEnglishLang(targetLang) {
+  return targetLang === 'en';
+}
+
+function getTargetLangFullName(targetLang, isAcademic = false) {
+  if (!targetLang) return isAcademic ? '中文(学术规范简体)' : '中文(简体)';
+  if (targetLang === 'zh-CN') return isAcademic ? '中文(学术规范简体)' : '中文(简体)';
+  return GLOBAL_LANG_NAME_MAP[targetLang] || targetLang;
+}
 
 // Google Gemini 官方接口翻译 (终身免费额度，支持上下文语境与学科角色术语对齐)
 async function translateGemini(text, targetLang, apiKey, modelName, context = null, persona = 'biochem', customPersonaPrompts = {}) {
   if (!apiKey) throw new Error('未配置 Gemini API Key，请在设置中配置');
   const cleanModel = (modelName || 'gemini-2.0-flash').replace(/^models\//, '');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
-  const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
+  const langName = getTargetLangFullName(targetLang, false);
   
   const { maskedText, tokenMap } = maskNumericEntities(text);
   const activePersona = typeof persona === 'string' ? persona : (persona ? 'biochem' : 'general');
@@ -506,38 +579,62 @@ async function translateGemini(text, targetLang, apiKey, modelName, context = nu
     else if (activePersona === 'economics') personaRole = '国际顶级期刊 (如 AER, QJE, JF) 的金融与计量经济学资深评审专家';
 
     prompt = `你是一名${personaRole}。
-用户在下方文献语境中选中了专业学术词汇/短语【${maskedText}】。请结合上下文语境进行专业消歧，将其精准翻译为${langName}。
+用户在下方文献语境中选中了专业学术词汇/短语【${maskedText}】。请结合上下文语境进行专业消歧，严格且只能将其精准翻译为${langName}。
 
 严格执行规则：
-1. 专业消歧定名：彻底消除孤立单字多义性（例如生化语境中 expression 翻译为“表达”而非“表情”；caspase 翻译为“半胱天冬酶”；cleaved 翻译为“剪切型/裂解型”；yield 翻译为“产率/收率”）。
-2. 仅翻译所选词汇：绝对严禁翻译或复述上下文语境内容！
-3. 输出简洁无干扰：直接输出最贴合该专业语境的最终译名，不要包含任何前导解释、拼音、注脚或标点说明。`;
-    if (matchedTerms && matchedTerms.length > 0) {
+1. 目标语言唯一性强制：翻译结果必须严格使用指定的目标语言【${langName}】，绝对严禁输出任何非指定的目标语种！
+2. 专业消歧定名：彻底消除孤立单字多义性（例如生化语境中 expression 翻译为“表达”而非“表情”；caspase 翻译为“半胱天冬酶”；cleaved 翻译为“剪切型/裂解型”；yield 翻译为“产率/收率”）。
+3. 仅翻译所选词汇：绝对严禁翻译或复述上下文语境内容！
+4. 输出简洁无干扰：直接输出最贴合该专业语境的最终译名，不要包含任何前导解释、拼音、注脚或标点说明。`;
+
+    if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
       prompt += `\n\n【权威学科审定专有名词定名标准】:`;
       matchedTerms.forEach(t => {
         prompt += `\n- "${t.term}" => "${t.translation}"`;
       });
+    } else if (!isChineseLang(targetLang) && !isEnglishLang(targetLang)) {
+      prompt += `\n\n【本土化学术规范强制约束】:
+严格遵循【${langName}】母语权威同行评审期刊的标准学术定名规范与语法体系，自主推导对应学术专有名词，严禁夹杂中文字符或非目标语言专名。`;
     }
+
     prompt += `\n\n【用户划词选中文本】:\n${maskedText}`;
     prompt += `\n\n【划词所在上下文语境 (仅供消歧理解，严禁翻译整个语境)】:\n${context}`;
   } else {
     let personaPrefix = '你是一个专业的学术与通用翻译官。';
     if (customPersonaPrompts && customPersonaPrompts[activePersona]) {
       personaPrefix = customPersonaPrompts[activePersona] + '\n';
-    } else if (activePersona === 'biochem') {
-      personaPrefix = '你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。严格遵循《中国化学会命名原则》与《生物化学名词》标准。';
-    } else if (activePersona === 'economics') {
-      personaPrefix = '你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼金融翻译家。严格遵循经典经济学与金融工程规范审定名词。';
+    } else if (isChineseLang(targetLang)) {
+      if (activePersona === 'biochem') {
+        personaPrefix = '你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。严格遵循《中国化学会命名原则》与《生物化学名词》标准。';
+      } else if (activePersona === 'economics') {
+        personaPrefix = '你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼金融翻译家。严格遵循经典经济学与金融工程规范审定名词。';
+      }
+    } else {
+      let personaTitle = '资深国际学术期刊评审专家兼母语级科学翻译家';
+      if (activePersona === 'biochem') personaTitle = '国际顶级期刊 (如 Cell, Nature, JACS) 的生物化学与分子生物学同行评审专家';
+      else if (activePersona === 'economics') personaTitle = '国际顶级期刊 (如 AER, QJE, JF) 的金融与计量经济学资深评审专家';
+      personaPrefix = `你是一名${personaTitle}。请严格遵循【${langName} 本土化学术规范】，自主推导并采用该语言最严谨地道的规范学术定名体系。\n`;
     }
 
-    prompt = `${personaPrefix}请将以下文本翻译为${langName}。如果输入内容已经是${langName}，则将其翻译为另一种语言（如中英互译）。
+    if (isChineseLang(targetLang)) {
+      prompt = `${personaPrefix}请将以下文本翻译为${langName}。如果输入内容已经是${langName}，则将其翻译为另一种语言（如中英互译）。
 请严格遵循以下规则：
 1. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围（如 15, 2024, 0.05, 95%）必须 100% 保持原始阿拉伯数字形态与格式，严禁写成汉字数字。
 2. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、机构名称、学术专有名词、专属缩写，仅在首次出现时在中文定名后以半角括号附带原文或缩写（如“世界自然基金会 (World Wildlife Fund)”）；后续再次出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
 3. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，必须严格保持相同行数与换行符位置，严禁跨行合并；若是普通连贯正文段落，保持自然流畅，切勿切碎。
 4. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 国际单位必须保留英文符号，严禁汉化；形如 __NUM_0__ 的占位符严禁篡改或丢失。`;
+    } else {
+      prompt = `${personaPrefix}请将以下文本翻译为指定目标语言【${langName}】。
+严格执行【${langName} 本土化学术规范】：
+0. 目标语言唯一性强制：译文必须 100% 严格且只能使用【${langName}】，绝对严禁输出任何中文字符或其他无关语种！
+1. 本土化学术术语标准：严格遵循【${langName}】母语权威同行评审期刊的标准学术定名体系。由你基于专业学科语境自主推导其在该语种中最严谨地道的规范学术词汇，确保动词变位、格位、性数配合及专业介词搭配完全符合母语学术标准。
+2. 数字与符号保留：所有阿拉伯数字、小数、百分比、指数、统计量（如 15, 0.05, 95%）必须 100% 保持原始阿拉伯数字形态与格式，严禁拼写为单词。
+3. 专用缩写首次出现原则：若专业国际通用缩写需要翻译或音译，仅在段落中首次出现时以半角括号附带原文缩写，后文直接使用标准译名，避免排版溢出。
+4. 标题与段落版式一致性：包含换行符 \\n 的独立标题或条目清单必须严格保持行数与结构完全一致，严禁跨行合并；正文段落保持语义通顺连贯，切勿生硬切碎。
+5. 国际单位与占位符绝对保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 单位保留原始英文字符；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。`;
+    }
 
-    if (matchedTerms && matchedTerms.length > 0) {
+    if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
       prompt += `\n\n【核心学科专有名词强制对齐表】:`;
       matchedTerms.forEach(t => {
         prompt += `\n- "${t.term}" => "${t.translation}"`;
@@ -577,7 +674,7 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
   if (!apiKey) throw new Error('该服务未配置 API Key，请在设置中配置');
   if (!endpoint) throw new Error('接口地址未配置');
 
-  const langName = targetLang === 'zh-CN' ? '中文(学术规范简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
+  const langName = getTargetLangFullName(targetLang, true);
   
   const { maskedText, tokenMap } = maskNumericEntities(text);
   const activePersona = typeof persona === 'string' ? persona : (persona ? 'biochem' : 'general');
@@ -600,17 +697,21 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
     else if (activePersona === 'economics') personaRole = '国际顶级期刊 (如 AER, QJE, JF) 的金融与计量经济学资深评审专家';
 
     let sysPrompt = `你是一名${personaRole}。
-用户在学术文献语境中选中了专业词汇/短语。请结合上下文语境进行专业消歧，将其精准翻译为${langName}。
+用户在学术文献语境中选中了专业词汇/短语。请结合上下文语境进行专业消歧，严格且只能将其精准翻译为指定目标语言【${langName}】。
 严格执行规则：
-1. 专业消歧定名：彻底消除孤立单字多义性（例如生化语境中 expression 翻译为“表达”而非“表情”；caspase 翻译为“半胱天冬酶”；cleaved 翻译为“剪切型/裂解型”；yield 翻译为“产率/收率”）。
-2. 仅翻译所选词汇：绝对严禁翻译或复述上下文语境内容！
-3. 输出简洁无干扰：直接输出最贴合该专业语境的最终译名，不要包含任何前导解释、拼音、注脚或标点说明。`;
+1. 目标语言唯一性强制：翻译结果必须严格使用指定的目标语言【${langName}】，绝对严禁输出任何非指定的目标语种（例如严禁输出韩语、日语等无关语种）！
+2. 专业消歧定名：彻底消除孤立单字多义性（例如生化语境中 expression 翻译为“表达”而非“表情”；caspase 翻译为“半胱天冬酶”；cleaved 翻译为“剪切型/裂解型”；yield 翻译为“产率/收率”）。
+3. 仅翻译所选词汇：绝对严禁翻译或复述上下文语境内容！
+4. 输出简洁无干扰：直接输出最贴合该专业语境的最终译名，不要包含任何前导解释、拼音、注脚或标点说明。`;
 
-    if (matchedTerms && matchedTerms.length > 0) {
+    if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
       sysPrompt += `\n\n【权威学科审定专有名词定名标准】:`;
       matchedTerms.forEach(t => {
         sysPrompt += `\n- "${t.term}" => "${t.translation}"`;
       });
+    } else if (!isChineseLang(targetLang) && !isEnglishLang(targetLang)) {
+      sysPrompt += `\n\n【本土化学术规范强制约束】:
+严格遵循【${langName}】母语权威同行评审期刊的标准学术定名规范与语法体系，自主推导对应学术专有名词，严禁夹杂中文字符或非目标语言专名。`;
     }
 
     const userPrompt = `【划词选中文本】:\n${maskedText}\n\n【划词所在上下文语境 (仅供消歧理解，严禁翻译整个语境)】:\n${context}`;
@@ -621,21 +722,24 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
   } else {
     let systemPrompt = '';
     if (customPersonaPrompts && customPersonaPrompts[activePersona]) {
-      systemPrompt = customPersonaPrompts[activePersona];
-    } else if (activePersona === 'economics') {
-      systemPrompt = `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼金融翻译家。
-请将待翻译的学术文本精准翻译为 ${langName}。
+      systemPrompt = customPersonaPrompts[activePersona] + `\n\n【核心约束】目标语言强制：必须严格且只能翻译为指定目标语言【${langName}】，绝对严禁输出其他无关语种！`;
+    } else if (isChineseLang(targetLang)) {
+      if (activePersona === 'economics') {
+        systemPrompt = `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼金融翻译家。
+请将待翻译的学术文本精准翻译为指定目标语言【${langName}】。
 严格规范：
+0. 目标语言强制：必须严格且只能翻译为【${langName}】，绝对严禁输出其他无关语种。
 1. 术语权威定名：严格遵循经典经济学与金融工程规范审定名词。
 2. 数字严禁汉化：所有阿拉伯数字、百分比、指数、统计量必须 100% 保持原始阿拉伯数字形态与格式，严禁转写为汉字。
 3. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词仅在当前段落首次出现时紧跟半角括号备注原文，后续重复出现时直接采用中文定名，严禁重复附加英文括号。
 4. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，必须严格保持相同行数与换行，严禁跨行合并；若是普通连贯正文段落，保持自然流畅，切勿机械切碎。
 5. 国际单位与占位符保护：USD, bps, %, pt 等保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。
 请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`;
-    } else if (activePersona === 'biochem') {
-      systemPrompt = `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
-请将待翻译的学术文本精准翻译为 ${langName}。
+      } else if (activePersona === 'biochem') {
+        systemPrompt = `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
+请将待翻译的学术文本精准翻译为指定目标语言【${langName}】。
 学术翻译强制要求：
+0. 目标语言强制：必须严格且只能翻译为【${langName}】，绝对严禁输出其他无关语种。
 1. 术语严格符合《中国化学会命名原则》与全国科学技术名词审定委员会《生物化学名词》标准。
 2. 严禁字面硬翻实验标准方法 (如 Western blot 译为 免疫印迹法；RT-qPCR 译为 逆转录定量PCR；Apoptosis 译为 细胞凋亡)。
 3. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保持原始阿拉伯数字形态与格式，严禁转写为汉字。
@@ -643,17 +747,34 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
 5. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，译文必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯，切勿生硬切碎。
 6. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L 等 SI 单位绝对保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改。
 请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`;
-    } else {
-      systemPrompt = `你是一个专业的高级学术与通用翻译官。请直接将用户输入的文本翻译为 ${langName}。
+      } else {
+        systemPrompt = `你是一个专业的高级学术与通用翻译官。请直接将用户输入的文本精准翻译为指定目标语言【${langName}】。
 严格规则：
+0. 目标语言强制：必须严格且只能翻译为【${langName}】，绝对严禁输出其他无关语种。
 1. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保持原始阿拉伯数字形态，绝对禁止转写为汉字。
 2. 专用词汇首次出现标注原则 (First-Occurrence Rule)：专有名词、学术机构、组织及专属缩写，仅在当前段落首次出现时在中文译名后以半角括号附带原文或缩写；后续再次出现时直接采用中文定名，严禁重复附加英文括号，坚决防止排版溢出。
 3. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，必须严格保持相同行数与换行，严禁跨行合并；若是普通连贯正文段落，保持自然通顺，切勿机械切碎。
 4. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 单位保留英文字符；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。
 请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`;
+      }
+    } else {
+      let personaTitle = '资深国际学术期刊评审专家与母语级科学翻译家';
+      if (activePersona === 'biochem') personaTitle = '国际顶级期刊 (如 Cell, Nature, JACS) 的生物化学与分子生物学同行评审专家';
+      else if (activePersona === 'economics') personaTitle = '国际顶级期刊 (如 AER, QJE, JF) 的金融与计量经济学资深评审专家';
+
+      systemPrompt = `你是一名${personaTitle}。
+请将待翻译的学术文本精准翻译为指定目标语言【${langName}】。
+严格执行【${langName} 本土化学术规范】：
+0. 目标语言唯一性强制：译文必须 100% 严格且只能使用【${langName}】，绝对严禁输出任何中文字符或其他无关语种！
+1. 本土化学术术语标准：严格遵循【${langName}】母语权威同行评审期刊的标准学术定名体系。由你基于专业学科语境自主推导其在该语种中最严谨地道的规范学术词汇，确保动词变位、格位、性数配合及专业介词搭配完全符合母语学术标准。
+2. 数字与符号保留：所有阿拉伯数字、小数、百分比、指数、统计量（如 15, 0.05, 95%）必须 100% 保持原始阿拉伯数字形态与格式，严禁拼写为单词。
+3. 专用缩写首次出现原则：若专业国际通用缩写需要翻译或音译，仅在段落中首次出现时以半角括号附带原文缩写，后文直接使用标准译名，避免排版溢出。
+4. 标题与段落版式一致性：包含换行符 \\n 的独立标题或条目清单必须严格保持行数与结构完全一致，严禁跨行合并；正文段落保持语义通顺连贯，切勿生硬切碎。
+5. 国际单位与占位符绝对保护：mg, mL, μm, kDa, mol/L, rpm, °C 等 SI 单位保留原始英文字符；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。
+请直接输出翻译结果，不要包含任何解释、前导词、注脚或说明。`;
     }
 
-    if (matchedTerms && matchedTerms.length > 0) {
+    if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
       systemPrompt += `\n\n【本段核心命中学科专有术语强制对齐表 (请严格按照下列定名翻译)】:`;
       matchedTerms.forEach(t => {
         const cat = t.category ? ` [${t.category}]` : '';
@@ -668,7 +789,7 @@ async function translateOpenAICompatible(text, targetLang, apiKey, endpoint, mod
 
     messages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `将以下文本翻译为 ${langName}：\n\n${maskedText}` }
+      { role: 'user', content: `将以下文本严格且只能翻译为【${langName}】，严禁输出任何其他语种：\n\n${maskedText}` }
     ];
   }
 
@@ -710,7 +831,7 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
   if (!apiKey) throw new Error('该服务未配置 API Key，请在设置中配置');
   if (!endpoint) throw new Error('接口地址未配置');
 
-  const langName = targetLang === 'zh-CN' ? '中文(学术规范简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
+  const langName = getTargetLangFullName(targetLang, true);
   
   const tokenMaps = new Map();
   const maskedItems = items.map(item => {
@@ -733,12 +854,13 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
 
   let systemPrompt = '';
   if (customPersonaPrompts && customPersonaPrompts[activePersona]) {
-    systemPrompt = customPersonaPrompts[activePersona];
+    systemPrompt = customPersonaPrompts[activePersona] + `\n\n【核心约束】目标语言强制：必须严格且只能翻译为指定目标语言【${langName}】，绝对严禁输出其他无关语种！`;
     if (!systemPrompt.includes('JSON')) {
       systemPrompt += `\n\n【排版与数据格式协议】:\n请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`;
     }
-  } else if (activePersona === 'economics') {
-    systemPrompt = `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼资深金融翻译家。
+  } else if (isChineseLang(targetLang)) {
+    if (activePersona === 'economics') {
+      systemPrompt = `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼资深金融翻译家。
 请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。
 学术规范：
 1. 术语权威定名：严格遵循经典经济学与金融工程规范审定名词（如 Quantitative Easing 译为 量化宽松；Phillips Curve 译为 菲利普斯曲线；Deadweight Loss 译为 无谓损失）。
@@ -748,8 +870,8 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
 5. 多行标题与自然段落智能区分：包含换行符 \\n 的独立多行标题或条目清单必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯。
 6. 国际单位与占位符保护：USD, bps, %, pt 等保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置。
 7. 必须输出合法的纯 JSON 数组，保持 id 严格一致，严禁任何 markdown 标记或解释。`;
-  } else if (activePersona === 'biochem') {
-    systemPrompt = `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
+    } else if (activePersona === 'biochem') {
+      systemPrompt = `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
 请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。
 学术翻译强制要求：
 1. 术语严格符合《中国化学会命名原则》与全国科学技术名词审定委员会《生物化学名词》标准。
@@ -759,8 +881,8 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
 5. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，译文必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯，切勿生硬切碎。
 6. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L 等 SI 单位绝对保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改。
 7. 保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`;
-  } else {
-    systemPrompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
+    } else {
+      systemPrompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
 严格遵循以下要求：
 1. 保持每一个对象的 "id" 字段与原始输入严格一致。
 2. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保留阿拉伯数字形态，绝对禁止转写为汉字。
@@ -769,10 +891,27 @@ async function translateBatchOpenAICompatible(items, targetLang, apiKey, endpoin
 5. 国际单位与占位符保护：SI 单位保留英文；形如 __NUM_0__ 的占位符严禁篡改或丢失。
 6. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
 7. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释。`;
+    }
+  } else {
+    let personaTitle = '资深国际学术期刊评审专家兼母语级科学翻译家';
+    if (activePersona === 'biochem') personaTitle = '国际顶级期刊 (如 Cell, Nature, JACS) 的生物化学与分子生物学同行评审专家';
+    else if (activePersona === 'economics') personaTitle = '国际顶级期刊 (如 AER, QJE, JF) 的金融与计量经济学资深评审专家';
+
+    systemPrompt = `你是一名${personaTitle}。
+请将待翻译的 JSON 数组中的每一个学术段落精准翻译为指定目标语言【${langName}】。
+严格执行【${langName} 本土化学术规范与排版协议】：
+0. 目标语言唯一性强制：译文必须 100% 严格且只能使用【${langName}】，绝对严禁输出任何中文字符或其他无关语种！
+1. 本土化学术术语标准：严格遵循【${langName}】母语权威同行评审期刊的标准学术定名体系。由你基于专业学科语境自主推导其在该语种中最严谨地道的规范学术词汇，确保动词变位、格位、性数配合及专业介词搭配完全符合母语学术标准。
+2. 数字与符号保留：所有阿拉伯数字、小数、百分比、指数、统计量（如 15, 0.05, 95%）必须 100% 保持原始阿拉伯数字形态与格式，严禁拼写为单词。
+3. 专用缩写首次出现原则：若专业国际通用缩写需要翻译或音译，仅在当前页首次出现时以半角括号附带原文缩写，后文直接使用标准译名，避免排版溢出。
+4. 保持段落结构一致：多行标题与独立清单必须严格保持相同换行与排版；普通正文段落保持语义通顺连贯，切勿生硬切碎。
+5. 国际单位与占位符保护：SI 单位保留原始英文字符；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。
+6. 严格保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
+7. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释。`;
   }
 
-  // 动态注入命中的学科专有名词强制对齐表
-  if (matchedTerms && matchedTerms.length > 0) {
+  // 动态注入命中的学科专有名词强制对齐表 (仅在目标语言为中文时生效)
+  if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
     systemPrompt += `\n\n【本段核心命中学科专有术语强制对齐表 (请严格按照下列定名翻译)】:`;
     matchedTerms.forEach(t => {
       const cat = t.category ? ` [${t.category}]` : '';
@@ -864,7 +1003,7 @@ async function translateBatchGemini(items, targetLang, apiKey, modelName, contex
   if (!apiKey) throw new Error('未配置 Gemini API Key，请在设置中配置');
   const cleanModel = (modelName || 'gemini-2.0-flash').replace(/^models\//, '');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
-  const langName = targetLang === 'zh-CN' ? '中文(简体)' : (targetLang === 'en' ? '英语' : (targetLang === 'ja' ? '日语' : '韩语'));
+  const langName = getTargetLangFullName(targetLang, false);
 
   const tokenMaps = new Map();
   const maskedItems = items.map(item => {
@@ -879,12 +1018,13 @@ async function translateBatchGemini(items, targetLang, apiKey, modelName, contex
 
   let prompt = '';
   if (customPersonaPrompts && customPersonaPrompts[activePersona]) {
-    prompt = customPersonaPrompts[activePersona];
+    prompt = customPersonaPrompts[activePersona] + `\n\n【核心约束】目标语言强制：必须严格且只能翻译为指定目标语言【${langName}】，绝对严禁输出其他无关语种！`;
     if (!prompt.includes('JSON')) {
       prompt += `\n\n【排版与数据格式协议】:\n请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`;
     }
-  } else if (activePersona === 'economics') {
-    prompt = `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼资深金融翻译家。
+  } else if (isChineseLang(targetLang)) {
+    if (activePersona === 'economics') {
+      prompt = `你是一名国际顶级经济学与金融学期刊 (如 AER, JPE, QJE, JF) 的资深学术评审专家兼资深金融翻译家。
 请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。
 学术规范：
 1. 术语权威定名：严格遵循经典经济学与金融工程规范审定名词（如 Quantitative Easing 译为 量化宽松；Phillips Curve 译为 菲利普斯曲线；Deadweight Loss 译为 无谓损失）。
@@ -894,8 +1034,8 @@ async function translateBatchGemini(items, targetLang, apiKey, modelName, contex
 5. 多行标题与自然段落智能区分：包含换行符 \\n 的独立多行标题或条目清单必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯。
 6. 国际单位与占位符保护：USD, bps, %, pt 等保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置。
 7. 必须输出合法的纯 JSON 数组，保持 id 严格一致，严禁任何 markdown 标记或解释。`;
-  } else if (activePersona === 'biochem') {
-    prompt = `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
+    } else if (activePersona === 'biochem') {
+      prompt = `你是一名国际顶级期刊 (如 Nature Chemical Biology, JACS, Cell) 的资深学术评审专家兼资深生化与分子生物学文献翻译家。
 请将待翻译的 JSON 数组中的每一个学术段落精准翻译为 ${langName}。
 学术翻译强制要求：
 1. 术语严格符合《中国化学会命名原则》与全国科学技术名词审定委员会《生物化学名词》标准。
@@ -905,8 +1045,8 @@ async function translateBatchGemini(items, targetLang, apiKey, modelName, contex
 5. 多行标题与自然段落智能区分：遇到包含换行符 \\n 的独立多行标题或条目清单，译文必须严格保持相同行数与换行；普通正文段落保持语义通顺连贯，切勿生硬切碎。
 6. 国际单位与占位符保护：mg, mL, μm, kDa, mol/L 等 SI 单位绝对保留英文；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改。
 7. 保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，严禁任何 markdown 标记或解释。`;
-  } else {
-    prompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
+    } else {
+      prompt = `你是一个专业的高级学术与文档翻译专家。请将待翻译的 JSON 数组中的每一个段落翻译为 ${langName}。
 严格遵循以下要求：
 1. 保持每一个对象的 "id" 字段与原始输入严格一致。
 2. 数字严禁汉化：所有阿拉伯数字、小数、百分比、科学计数法与范围必须 100% 保留阿拉伯数字形态，绝对禁止转写为汉字。
@@ -915,10 +1055,27 @@ async function translateBatchGemini(items, targetLang, apiKey, modelName, contex
 5. 国际单位与占位符保护：SI 单位保留英文；形如 __NUM_0__ 的占位符严禁篡改或丢失。
 6. 必须输出且仅输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
 7. 严禁包含任何 Markdown 标记（如 \`\`\`json ），严禁附加任何解释。`;
+    }
+  } else {
+    let personaTitle = '资深国际学术期刊评审专家兼母语级科学翻译家';
+    if (activePersona === 'biochem') personaTitle = '国际顶级期刊 (如 Cell, Nature, JACS) 的生物化学与分子生物学同行评审专家';
+    else if (activePersona === 'economics') personaTitle = '国际顶级期刊 (如 AER, QJE, JF) 的金融与计量经济学资深评审专家';
+
+    prompt = `你是一名${personaTitle}。
+请将待翻译的 JSON 数组中的每一个学术段落精准翻译为指定目标语言【${langName}】。
+严格执行【${langName} 本土化学术规范与排版协议】：
+0. 目标语言唯一性强制：译文必须 100% 严格且只能使用【${langName}】，绝对严禁输出任何中文字符或其他无关语种！
+1. 本土化学术术语标准：严格遵循【${langName}】母语权威同行评审期刊的标准学术定名体系。由你基于专业学科语境自主推导其在该语种中最严谨地道的规范学术词汇，确保动词变位、格位、性数配合及专业介词搭配完全符合母语学术标准。
+2. 数字与符号保留：所有阿拉伯数字、小数、百分比、指数、统计量（如 15, 0.05, 95%）必须 100% 保持原始阿拉伯数字形态与格式，严禁拼写为单词。
+3. 专用缩写首次出现原则：若专业国际通用缩写需要翻译或音译，仅在当前页首次出现时以半角括号附带原文缩写，后文直接使用标准译名，避免排版溢出。
+4. 保持段落结构一致：多行标题与独立清单必须严格保持相同换行与排版；普通正文段落保持语义通顺连贯，切勿生硬切碎。
+5. 国际单位与占位符保护：SI 单位保留原始英文字符；形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改或丢失。
+6. 严格保持每一个对象的 "id" 字段与输入严格一致，必须输出合法的纯 JSON 数组，格式为 [{"id": 0, "text": "译文"}...]。
+7. 严禁包含任何 Markdown 代码块标记（如 \`\`\`json ），严禁附加任何解释。`;
   }
 
-  // 动态注入命中的学科专有名词强制对齐表
-  if (matchedTerms && matchedTerms.length > 0) {
+  // 动态注入命中的学科专有名词强制对齐表 (仅在目标语言为中文时生效)
+  if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
     prompt += `\n\n【本段核心命中学科专有术语强制对齐表 (请严格按照下列定名翻译)】:`;
     matchedTerms.forEach(t => {
       const cat = t.category ? ` [${t.category}]` : '';
@@ -1545,6 +1702,286 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
 
     return true; // 异步支持
+  }
+});
+
+// 3.8 通用流式请求封装 (支持划词悬浮窗打字机与论文总结)
+async function streamOpenAIEndpoint({ apiKey, endpoint, modelName, messages, temperature = 0.2, signal, onChunk }) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+    'HTTP-Referer': 'https://github.com/GeoffLeng/Translation-Tools',
+    'X-Title': 'Translate FY'
+  };
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify({
+      model: modelName,
+      messages: messages,
+      temperature: temperature,
+      stream: true
+    }),
+    signal: signal
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error?.message || `API 错误: ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let fullOutput = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // 保留不完整尾行
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(':')) continue;
+      if (trimmed === 'data: [DONE]') continue;
+      if (trimmed.startsWith('data:')) {
+        try {
+          const json = JSON.parse(trimmed.slice(5).trim());
+          const delta = json.choices?.[0]?.delta?.content || '';
+          if (delta) {
+            fullOutput += delta;
+            onChunk(delta);
+          }
+        } catch (e) {}
+      }
+    }
+  }
+  return fullOutput;
+}
+
+// 4. 长连接流式通信总线 (Streaming Port Listener)
+chrome.runtime.onConnect.addListener((port) => {
+  // 划词浮窗长连接逐字打字机
+  if (port.name === 'translate-stream') {
+    let abortController = new AbortController();
+
+    port.onDisconnect.addListener(() => {
+      abortController.abort();
+    });
+
+    port.onMessage.addListener((request) => {
+      const { text, engine, targetLang, model, context, persona } = request;
+      const activePersona = persona || 'biochem';
+
+      port.postMessage({ type: 'start' });
+
+      chrome.storage.local.get({
+        glmApiKey: '',
+        glmActiveModel: 'glm-4-flash',
+        deepseekApiKey: '',
+        deepseekActiveModel: 'deepseek-chat',
+        deeplApiKey: '',
+        deeplEndpoint: '',
+        youdaoAppKey: '',
+        youdaoAppSecret: '',
+        customModels: [],
+        customPersonaPrompts: {}
+      }, async (settings) => {
+        try {
+          let fullResult = '';
+          const isAIStream = (engine === 'glm' || engine === 'deepseek' || (engine && engine.startsWith('custom_')));
+
+          if (isAIStream) {
+            let apiKey = '';
+            let endpoint = '';
+            let modelName = '';
+
+            if (engine === 'glm') {
+              apiKey = settings.glmApiKey;
+              endpoint = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+              modelName = model || settings.glmActiveModel || 'glm-4-flash';
+            } else if (engine === 'deepseek') {
+              apiKey = settings.deepseekApiKey;
+              endpoint = 'https://api.deepseek.com/chat/completions';
+              modelName = model || settings.deepseekActiveModel || 'deepseek-chat';
+            } else if (engine.startsWith('custom_')) {
+              const customId = engine.substring(7);
+              const customModel = settings.customModels.find(m => m.id === customId);
+              if (customModel) {
+                apiKey = customModel.apiKey;
+                endpoint = customModel.endpoint;
+                modelName = customModel.modelName;
+              }
+            }
+
+            if (!apiKey) throw new Error('该 AI 引擎尚未配置 API Key，请在设置中配置');
+            if (!endpoint) throw new Error('接口地址未配置');
+
+            const langName = getTargetLangFullName(targetLang, true);
+            const { maskedText, tokenMap } = maskNumericEntities(text);
+            const fullScanText = (text || '') + (context ? ' ' + context : '');
+            const matchedTerms = matchTerms(fullScanText, 10, activePersona);
+
+            let sysPrompt = `你是一名国际顶级学术期刊的资深学术评审专家兼母语级科学翻译家。请将待翻译文本严格且只能翻译为指定目标语言【${langName}】。
+规则约束：
+0. 目标语言强制：必须 100% 严格使用【${langName}】，绝对严禁输出任何其他语种！
+1. 数字与符号保留：所有阿拉伯数字、小数、百分比、科学计数法必须 100% 保持原始形态。
+2. 专业术语权威对齐：严格遵循该学科最严谨规范的标准定名。
+3. 占位符绝对保护：形如 __NUM_0__ 的占位符必须原样保留在对应位置，严禁篡改。
+请直接输出翻译结果，不要包含任何前导解释、注脚或标点说明。`;
+
+            if (isChineseLang(targetLang) && matchedTerms && matchedTerms.length > 0) {
+              sysPrompt += `\n\n【核心学科专有名词强制对齐表】:`;
+              matchedTerms.forEach(t => {
+                sysPrompt += `\n- "${t.term}" => "${t.translation}"`;
+              });
+            }
+
+            const messages = [
+              { role: 'system', content: sysPrompt },
+              { role: 'user', content: `将以下文本精准翻译为【${langName}】：\n\n${maskedText}` }
+            ];
+
+            const rawOutput = await streamOpenAIEndpoint({
+              apiKey,
+              endpoint,
+              modelName,
+              messages,
+              signal: abortController.signal,
+              onChunk: (delta) => {
+                port.postMessage({ type: 'chunk', delta });
+              }
+            });
+
+            fullResult = unmaskNumericEntities(rawOutput, tokenMap);
+          } else {
+            // 传统免 Key 引擎 (Google / Bing / DeepL / Youdao)
+            if (engine === 'google') {
+              fullResult = await translateGoogle(text, targetLang);
+            } else if (engine === 'bing') {
+              fullResult = await translateBing(text, targetLang);
+            } else if (engine === 'deepl') {
+              fullResult = await translateDeepL(text, targetLang, settings.deeplApiKey, settings.deeplEndpoint);
+            } else if (engine === 'youdao') {
+              fullResult = await translateYoudao(text, targetLang, settings.youdaoAppKey, settings.youdaoAppSecret);
+            } else {
+              fullResult = await translateGoogle(text, targetLang);
+            }
+          }
+
+          port.postMessage({ type: 'done', fullText: fullResult });
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            port.postMessage({ type: 'error', error: err.message });
+          }
+        }
+      });
+    });
+  }
+
+  // 论文一键骨干学术总结长连接通道
+  if (port.name === 'paper-summary-stream') {
+    let abortController = new AbortController();
+
+    port.onDisconnect.addListener(() => {
+      abortController.abort();
+    });
+
+    port.onMessage.addListener((request) => {
+      const { backbone, engine, targetLang, model } = request;
+
+      port.postMessage({ type: 'start' });
+
+      chrome.storage.local.get({
+        glmApiKey: '',
+        glmActiveModel: 'glm-4-flash',
+        deepseekApiKey: '',
+        deepseekActiveModel: 'deepseek-chat',
+        customModels: []
+      }, async (settings) => {
+        try {
+          let apiKey = settings.glmApiKey || settings.deepseekApiKey;
+          let endpoint = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+          let modelName = model || settings.glmActiveModel || 'glm-4-flash';
+
+          if (engine === 'deepseek') {
+            apiKey = settings.deepseekApiKey;
+            endpoint = 'https://api.deepseek.com/chat/completions';
+            modelName = model || settings.deepseekActiveModel || 'deepseek-chat';
+          } else if (engine && engine.startsWith('custom_')) {
+            const customId = engine.substring(7);
+            const customModel = settings.customModels.find(m => m.id === customId);
+            if (customModel) {
+              apiKey = customModel.apiKey;
+              endpoint = customModel.endpoint;
+              modelName = customModel.modelName;
+            }
+          } else if (settings.glmApiKey) {
+            apiKey = settings.glmApiKey;
+            endpoint = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+            modelName = model || settings.glmActiveModel || 'glm-4-flash';
+          }
+
+          if (!apiKey) {
+            throw new Error('学术论文总结需要 AI 大模型支持，请在设置中配置 智谱 GLM 或 DeepSeek API Key (智谱 GLM-4-Flash 永久免费)');
+          }
+
+          const summaryPrompt = `你是一名国际顶级学术期刊 (如 Nature, Science, Cell, IEEE, ACM) 的资深学术主编兼同行评审专家。
+请根据以下从论文中精准抽取的骨干信息（包含标题/摘要、主要章节大纲、以及结论部分），为学术研究者撰写一份高信息密度、逻辑结构严密的【论文核心框架与学术大纲总结】。
+
+必须严格输出为中文，并严格按照以下 4 个结构化板块组织排版，使用精美清晰的 Markdown 格式：
+
+### 💡 1. 研究背景与核心痛点 (Background & Problem)
+- 本文针对什么现实痛点或科学瓶颈展开研究？现有已有方法存在什么缺陷？
+
+### 🔥 2. 核心创新与贡献 (Key Contributions)
+- 作者提出了什么新机制、新理论或新模型？
+- 本文最核心的 1~3 个独创性突破点是什么？
+
+### 🛠️ 3. 方法与技术路线 (Methodology & Architecture)
+- 核心算法/模型架构的关键模块与运行机制是什么？
+- 结合以下章节大纲简述其论证框架：
+${backbone.headings || '（未显式分节）'}
+
+### 📊 4. 实验结论与研究局限 (Findings & Limitations)
+- 关键实验取得了什么代表性指标或定性结论？
+- 作者在结论或讨论中指出了该研究的哪些不足与未来展望 (Future Work)？
+
+【论文骨干抽取样本】:
+前言与摘要部分:
+${backbone.headSample || ''}
+
+结论与讨论部分:
+${backbone.tailSample || ''}
+`;
+
+          const messages = [
+            { role: 'system', content: '你是一名专业的顶级学术主编，精通文献精读、要点提炼与框架化输出。' },
+            { role: 'user', content: summaryPrompt }
+          ];
+
+          const fullResult = await streamOpenAIEndpoint({
+            apiKey,
+            endpoint,
+            modelName,
+            messages,
+            temperature: 0.3,
+            signal: abortController.signal,
+            onChunk: (delta) => {
+              port.postMessage({ type: 'chunk', delta });
+            }
+          });
+
+          port.postMessage({ type: 'done', fullText: fullResult });
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            port.postMessage({ type: 'error', error: err.message });
+          }
+        }
+      });
+    });
   }
 });
 

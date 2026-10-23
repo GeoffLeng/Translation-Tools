@@ -93,6 +93,11 @@
           <span>Translate All & Download</span>
         </button>
 
+        <button id="summarize-doc-btn" class="top-action-btn summary-btn" disabled title="一键提炼论文核心大纲、创新贡献与研究框架 (极速低 Token 骨干抽取)">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span>论文总结</span>
+        </button>
+
         <button id="advanced-trans-btn" class="top-action-btn purple-btn" title="微调专业术语遮罩、滑动窗口断句、翻译排版覆盖样式与大模型参数">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
           <span>高级选项</span>
@@ -206,8 +211,7 @@
       </div>
 
       <div class="header-sub-right">
-        <!-- 学术与翻译专家角色切换器 (唯一保留智能功能标注) -->
-        <div class="persona-select-group" data-tooltip-persona="true" data-tooltip-title="学术翻译角色体系" data-tooltip-desc="根据专业领域挂载权威词库与高标准提示词">
+        <div class="persona-select-group">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M12 2l9 4.9V17L12 22 3 17V6.9z"></path><path d="M12 22V12"></path><path d="M12 12L3 6.9"></path><path d="M12 12l9-5.1"></path></svg>
           <span class="sub-label">角色</span>
           <select id="persona-select" class="sub-select-inline persona-select-box">
@@ -700,6 +704,33 @@
         <span class="ink-slider-label">透</span>
         <input type="range" id="ink-opacity-slider" min="10" max="100" value="35" step="5" class="ink-range-slider">
         <span class="ink-slider-label">实</span>
+      </div>
+    </div>
+  <!-- 论文一键学术大纲与框架总结侧边抽屉 (Paper Summary Drawer) -->
+  <div id="paper-summary-drawer" class="paper-summary-drawer hidden">
+    <div class="summary-drawer-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#2563EB" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        <span class="summary-drawer-title">论文核心框架与学术总结</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button id="copy-summary-btn" class="drawer-action-btn" title="复制总结 Markdown">复制</button>
+        <button id="close-summary-drawer-btn" class="drawer-close-btn" title="关闭">✕</button>
+      </div>
+    </div>
+
+    <div class="summary-drawer-badge-row">
+      <span class="summary-badge">⚡ 骨干抽取模式 (消耗约 1,800 Token)</span>
+      <span id="summary-status-label" class="summary-status-label">准备就绪</span>
+    </div>
+
+    <div class="summary-drawer-body">
+      <div id="summary-loading-spinner" class="summary-spinner-wrap hidden">
+        <div class="spinner" style="position:static; margin: 20px auto; border-top-color:#2563eb;"></div>
+        <p style="font-size:12.5px; color:#64748b; text-align:center;">正在提取 Abstract、目录骨架与 Conclusion...</p>
+      </div>
+      <div id="summary-content" class="summary-markdown-content">
+        <!-- Markdown 总结内容 -->
       </div>
     </div>
   </div>

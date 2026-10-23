@@ -11,12 +11,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelSelectContainer = document.getElementById('model-select-container');
   const swapLangBtn = document.getElementById('swap-lang-btn');
   const copyBtn = document.getElementById('copy-btn');
+  const starBtn = document.getElementById('star-btn');
   const speakSrcBtn = document.getElementById('speak-src-btn');
   const speakResBtn = document.getElementById('speak-res-btn');
   const settingsBtn = document.getElementById('settings-btn');
   const loadingSpinner = document.getElementById('loading-spinner');
   const currentEngineBadge = document.getElementById('current-engine-badge');
   const pdfNavBtn = document.getElementById('pdf-nav-btn');
+  const vocabNavBtn = document.getElementById('vocab-nav-btn');
+  const vocabOverlay = document.getElementById('vocab-overlay');
+  const closeVocabBtn = document.getElementById('close-vocab-btn');
+  const vocabSearchInput = document.getElementById('vocab-search-input');
+  const tabVocabAll = document.getElementById('tab-vocab-all');
+  const tabVocabStarred = document.getElementById('tab-vocab-starred');
+  const countAll = document.getElementById('count-all');
+  const countStarred = document.getElementById('count-starred');
+  const vocabList = document.getElementById('vocab-list');
+  const exportVocabMdBtn = document.getElementById('export-vocab-md-btn');
+  const exportVocabCsvBtn = document.getElementById('export-vocab-csv-btn');
+  const clearUnstarredBtn = document.getElementById('clear-unstarred-btn');
 
   // 一键直达本地 PDF 沉浸式翻译 Web 页面
   if (pdfNavBtn) {
@@ -173,7 +186,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 根据选中的引擎渲染并加载活跃模型
       updateModelSelect(() => {
-        // 如果有选中的文本，自动填入并翻译
+        // 优先检查 URL 参数中的待翻译文本 (如右键菜单唤起或独立小窗唤起: ?text=...)
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryText = urlParams.get('text');
+        if (queryText && queryText.trim()) {
+          sourceText.value = queryText.trim();
+          clearBtn.classList.remove('hidden');
+          performTranslation();
+          return;
+        }
+
+        // 如果没有 URL 参数，再检查当前活动标签页选中的文本，自动填入并翻译
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           if (tabs && tabs[0] && tabs[0].id) {
             if (chrome.scripting && chrome.scripting.executeScript) {
@@ -248,12 +271,14 @@ document.addEventListener('DOMContentLoaded', () => {
       resultText.textContent = '翻译结果将在此显示...';
       resultText.classList.add('result-placeholder');
       loadingSpinner.classList.add('hidden');
+      if (starBtn) starBtn.classList.remove('starred');
       return;
     }
 
     resultText.classList.remove('result-placeholder');
     loadingSpinner.classList.remove('hidden');
     resultText.textContent = '';
+    if (starBtn) starBtn.classList.remove('starred');
 
     const engine = engineSelect.value;
     const target = tgtLang.value;
@@ -277,6 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (response.success) {
         resultText.textContent = response.translation;
         resultText.style.color = '';
+        saveVocabularyRecord(text, response.translation, engine, false);
       } else {
         resultText.textContent = `翻译出错：${response.error}`;
         resultText.style.color = '#ff3b30';
@@ -389,6 +415,218 @@ document.addEventListener('DOMContentLoaded', () => {
       speakText(resultText.textContent.trim());
     }
   });
+
+  // 本地生词本存储逻辑
+  function saveVocabularyRecord(word, translation, engine, isStarred = false) {
+    if (!word || !translation) return;
+    chrome.storage.local.get({ vocabularyHistory: [] }, (res) => {
+      let list = Array.isArray(res.vocabularyHistory) ? res.vocabularyHistory : [];
+      const cleanWord = word.trim();
+      const existingIndex = list.findIndex(item => item.word.toLowerCase() === cleanWord.toLowerCase());
+      if (existingIndex >= 0) {
+        list[existingIndex].translation = translation.trim();
+        list[existingIndex].engine = engine;
+        list[existingIndex].timestamp = Date.now();
+        if (isStarred !== undefined) list[existingIndex].starred = isStarred;
+      } else {
+        list.unshift({
+          id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          word: cleanWord,
+          translation: translation.trim(),
+          engine: engine,
+          timestamp: Date.now(),
+          starred: !!isStarred
+        });
+        if (list.length > 2000) {
+          const starred = list.filter(item => item.starred);
+          const unstarred = list.filter(item => !item.starred);
+          list = [...starred, ...unstarred.slice(0, 2000 - starred.length)];
+        }
+      }
+      chrome.storage.local.set({ vocabularyHistory: list });
+    });
+  }
+
+  // 收藏当前输入词汇
+  if (starBtn) {
+    starBtn.addEventListener('click', () => {
+      const word = sourceText.value.trim();
+      const trans = resultText.textContent.trim();
+      if (!word || !trans || resultText.classList.contains('result-placeholder')) return;
+
+      const isStarred = starBtn.classList.toggle('starred');
+      saveVocabularyRecord(word, trans, engineSelect.value, isStarred);
+    });
+  }
+
+  // 生词本抽屉管理
+  let vocabCurrentTab = 'all'; // 'all' | 'starred'
+  let cachedVocabList = [];
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${m}-${day} ${h}:${min}`;
+  }
+
+  function renderVocabDOM() {
+    const filterText = (vocabSearchInput.value || '').trim().toLowerCase();
+    let displayList = cachedVocabList.filter(item => {
+      const matchWord = item.word.toLowerCase().includes(filterText);
+      const matchTrans = item.translation.toLowerCase().includes(filterText);
+      const matchTab = vocabCurrentTab === 'all' || (vocabCurrentTab === 'starred' && item.starred);
+      return (matchWord || matchTrans) && matchTab;
+    });
+
+    const totalCount = cachedVocabList.length;
+    const starredCount = cachedVocabList.filter(i => i.starred).length;
+    countAll.textContent = totalCount;
+    countStarred.textContent = starredCount;
+
+    vocabList.innerHTML = '';
+    if (displayList.length === 0) {
+      vocabList.innerHTML = `<div class="vocab-empty">暂无相关生词记录</div>`;
+      return;
+    }
+
+    displayList.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'vocab-item';
+      card.innerHTML = `
+        <div class="vocab-item-top">
+          <span class="vocab-item-word">${item.word}</span>
+          <div class="vocab-item-actions">
+            <button class="vocab-icon-btn star-toggle ${item.starred ? 'starred' : ''}" title="${item.starred ? '取消收藏' : '加入收藏'}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="${item.starred ? '#ff9500' : 'none'}" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            </button>
+            <button class="vocab-icon-btn item-del" title="删除">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+        </div>
+        <div class="vocab-item-trans">${item.translation}</div>
+        <div class="vocab-item-meta">
+          <span>${item.engine || 'google'}</span>
+          <span>${formatTime(item.timestamp)}</span>
+        </div>
+      `;
+
+      // 切换收藏
+      card.querySelector('.star-toggle').onclick = () => {
+        item.starred = !item.starred;
+        chrome.storage.local.set({ vocabularyHistory: cachedVocabList }, () => {
+          renderVocabDOM();
+        });
+      };
+
+      // 单条删除
+      card.querySelector('.item-del').onclick = () => {
+        cachedVocabList = cachedVocabList.filter(i => i.id !== item.id);
+        chrome.storage.local.set({ vocabularyHistory: cachedVocabList }, () => {
+          renderVocabDOM();
+        });
+      };
+
+      vocabList.appendChild(card);
+    });
+  }
+
+  function loadAndRenderVocab() {
+    chrome.storage.local.get({ vocabularyHistory: [] }, (res) => {
+      cachedVocabList = Array.isArray(res.vocabularyHistory) ? res.vocabularyHistory : [];
+      renderVocabDOM();
+    });
+  }
+
+  if (vocabNavBtn) {
+    vocabNavBtn.onclick = () => {
+      vocabOverlay.classList.remove('hidden');
+      loadAndRenderVocab();
+    };
+  }
+
+  if (closeVocabBtn) {
+    closeVocabBtn.onclick = () => {
+      vocabOverlay.classList.add('hidden');
+    };
+  }
+
+  if (tabVocabAll) {
+    tabVocabAll.onclick = () => {
+      vocabCurrentTab = 'all';
+      tabVocabAll.classList.add('active');
+      tabVocabStarred.classList.remove('active');
+      renderVocabDOM();
+    };
+  }
+
+  if (tabVocabStarred) {
+    tabVocabStarred.onclick = () => {
+      vocabCurrentTab = 'starred';
+      tabVocabStarred.classList.add('active');
+      tabVocabAll.classList.remove('active');
+      renderVocabDOM();
+    };
+  }
+
+  if (vocabSearchInput) {
+    vocabSearchInput.oninput = () => {
+      renderVocabDOM();
+    };
+  }
+
+  // 导出 Markdown
+  if (exportVocabMdBtn) {
+    exportVocabMdBtn.onclick = () => {
+      if (cachedVocabList.length === 0) return alert('当前生词本为空');
+      let md = `# Translate FY 生词本导出\n\n`;
+      md += `> 导出时间：${new Date().toLocaleString()} | 共 ${cachedVocabList.length} 条\n\n`;
+      md += `| 单词/短语 | 释义/译文 | 引擎 | 收藏 | 记录时间 |\n`;
+      md += `| :--- | :--- | :--- | :---: | :--- |\n`;
+      cachedVocabList.forEach(item => {
+        md += `| **${item.word.replace(/\|/g, '\\|')}** | ${item.translation.replace(/\|/g, '\\|').replace(/\n/g, '<br>')} | ${item.engine || 'google'} | ${item.starred ? '★' : ''} | ${formatTime(item.timestamp)} |\n`;
+      });
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `translate-fy-vocabulary-${new Date().toISOString().slice(0, 10)}.md`;
+      a.click();
+    };
+  }
+
+  // 导出 CSV
+  if (exportVocabCsvBtn) {
+    exportVocabCsvBtn.onclick = () => {
+      if (cachedVocabList.length === 0) return alert('当前生词本为空');
+      let csv = '\uFEFF"Word","Translation","Engine","Starred","Date"\n';
+      cachedVocabList.forEach(item => {
+        csv += `"${item.word.replace(/"/g, '""')}","${item.translation.replace(/"/g, '""')}","${item.engine || ''}","${item.starred ? 'Yes' : 'No'}","${formatTime(item.timestamp)}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `translate-fy-vocabulary-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+    };
+  }
+
+  // 清理未收藏
+  if (clearUnstarredBtn) {
+    clearUnstarredBtn.onclick = () => {
+      const starredCount = cachedVocabList.filter(i => i.starred).length;
+      if (confirm(`确定要清空未收藏的历史记录吗？已收藏的 ${starredCount} 条生词将完好保留。`)) {
+        cachedVocabList = cachedVocabList.filter(i => i.starred);
+        chrome.storage.local.set({ vocabularyHistory: cachedVocabList }, () => {
+          renderVocabDOM();
+        });
+      }
+    };
+  }
 
   // 点击打开选项设置页面
   settingsBtn.addEventListener('click', () => {

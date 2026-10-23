@@ -1,19 +1,28 @@
 // Content Script for iOS Translate Lite (v2.0)
 
 (function () {
-  if (window.__iosTranslateInjected) return;
-  window.__iosTranslateInjected = true;
+  // 清理上一实例（若存在热重载或重新注入情况）
+  if (window.__iosTranslateCleanup) {
+    try { window.__iosTranslateCleanup(); } catch (e) {}
+  }
 
-  // 1. 创建 Shadow Host
+  // 清理遗留或因扩展更新失效的旧 Shadow Host
+  const existingHost = document.getElementById('ios-translate-shadow-host');
+  if (existingHost) {
+    try { existingHost.remove(); } catch (e) {}
+  }
+
+  // 1. 创建 Shadow Host (采用 fixed 视口穿透，彻底杜绝 body 样式与滚动偏移影响)
   const host = document.createElement('div');
   host.id = 'ios-translate-shadow-host';
-  host.style.position = 'absolute';
+  host.style.position = 'fixed';
   host.style.top = '0';
   host.style.left = '0';
-  host.style.width = '100%';
+  host.style.width = '0';
   host.style.height = '0';
+  host.style.pointerEvents = 'none';
   host.style.zIndex = '2147483647';
-  document.body.appendChild(host);
+  (document.body || document.documentElement).appendChild(host);
 
   const shadowRoot = host.attachShadow({ mode: 'open' });
 
@@ -31,7 +40,8 @@
 
     /* 悬浮小图标 */
     .ios-float-icon {
-      position: absolute;
+      position: fixed;
+      pointer-events: auto;
       width: 32px;
       height: 32px;
       padding: 0;
@@ -71,7 +81,8 @@
 
     /* 翻译面板 - iOS 26 毛玻璃卡片 */
     .ios-panel {
-      position: absolute;
+      position: fixed;
+      pointer-events: auto;
       width: 360px;
       min-height: 160px;
       border-radius: 20px;
@@ -216,6 +227,11 @@
     .panel-icon-btn.active {
       background: rgba(0, 122, 255, 0.15);
       color: #007AFF;
+    }
+
+    .panel-icon-btn.starred {
+      background: rgba(255, 149, 0, 0.15);
+      color: #ff9500;
     }
 
     .panel-toolbar-row {
@@ -456,6 +472,9 @@
             <button id="panel-copy-res-btn" class="panel-icon-btn" title="复制译文">
               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
+            <button id="panel-star-btn" class="panel-icon-btn" title="收藏到生词本">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            </button>
           </div>
         </div>
         <div class="panel-result-wrapper">
@@ -494,6 +513,7 @@
   const speakSrcBtn = shadowRoot.getElementById('panel-speak-src-btn');
   const speakResBtn = shadowRoot.getElementById('panel-speak-res-btn');
   const copyResBtn = shadowRoot.getElementById('panel-copy-res-btn');
+  const panelStarBtn = shadowRoot.getElementById('panel-star-btn');
   const dragHandle = shadowRoot.getElementById('panel-drag-handle');
 
   const pdfModal = shadowRoot.getElementById('pdf-modal');
@@ -507,6 +527,7 @@
   let activePdfLink = '';
   let isDragging = false;
   let isPinned = false;
+  let currentStreamPort = null;
   let dragOffset = { x: 0, y: 0 };
 
   // 浮窗左右拉伸逻辑
@@ -526,7 +547,7 @@
 
     const startX = e.clientX;
     const startWidth = translatePanel.offsetWidth;
-    const startLeft = translatePanel.offsetLeft;
+    const startLeft = translatePanel.getBoundingClientRect().left;
 
     document.body.style.cursor = 'ew-resize';
     document.body.style.userSelect = 'none';
@@ -677,23 +698,64 @@
     loadAvailableEngines();
   });
 
-  // 读取偏好设置
+  // 读取偏好设置 (带异常容错降级)
   function getSettings(callback) {
-    chrome.storage.local.get({
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get({
+          enableSelectionTranslate: true,
+          autoShowPanel: false,
+          defaultTargetLang: 'zh-CN',
+          defaultEngine: 'google',
+          triggerMode: 'direct'
+        }, (res) => {
+          if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+            callback({
+              enableSelectionTranslate: true,
+              autoShowPanel: false,
+              defaultTargetLang: 'zh-CN',
+              defaultEngine: 'google',
+              triggerMode: 'direct'
+            });
+          } else {
+            callback(res || {
+              enableSelectionTranslate: true,
+              autoShowPanel: false,
+              defaultTargetLang: 'zh-CN',
+              defaultEngine: 'google',
+              triggerMode: 'direct'
+            });
+          }
+        });
+        return;
+      }
+    } catch (e) {}
+    callback({
       enableSelectionTranslate: true,
       autoShowPanel: false,
       defaultTargetLang: 'zh-CN',
       defaultEngine: 'google',
       triggerMode: 'direct'
-    }, callback);
+    });
   }
 
   // 5. 网页划词事件监听
-  document.addEventListener('mouseup', (e) => {
-    if (e.target === host || host.contains(e.target)) return;
+  const handleMouseUp = (e) => {
+    const isClickedInsideHost = e.target === host || (e.composedPath && e.composedPath().includes(host)) || host.contains(e.target);
+    if (isClickedInsideHost) return;
+
+    // 输入框、文本域与富文本编辑器防误触抑制
+    const isEditable = e.target && (
+      e.target.tagName === 'INPUT' ||
+      e.target.tagName === 'TEXTAREA' ||
+      e.target.isContentEditable ||
+      (e.target.closest && e.target.closest('input, textarea, [contenteditable="true"], [role="textbox"], .monaco-editor'))
+    );
+    if (isEditable) return;
 
     setTimeout(() => {
       const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return;
       const rawText = selection.toString().trim();
 
       if (!rawText || rawText.length < 1 || rawText.length > 2000) {
@@ -713,14 +775,14 @@
         if (settings.triggerMode === 'alt' && !e.altKey) return;
         if (settings.triggerMode === 'ctrl' && !(e.ctrlKey || e.metaKey)) return;
 
+        if (!selection || selection.rangeCount === 0) return;
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
-        
-        const scrollX = window.scrollX || window.pageXOffset;
-        const scrollY = window.scrollY || window.pageYOffset;
+        if (rect.width === 0 && rect.height === 0) return;
 
-        const posX = rect.right + scrollX + 4;
-        const posY = rect.bottom + scrollY + 4;
+        // 由于 host、floatIcon、translatePanel 均为 fixed 定位，直接使用视口客户区坐标
+        const posX = rect.right + 6;
+        const posY = rect.bottom + 6;
 
         if (settings.autoShowPanel) {
           showPanel(posX, posY, text, settings.defaultEngine, settings.defaultTargetLang);
@@ -729,25 +791,26 @@
         }
       });
     }, 20);
-  });
+  };
+  document.addEventListener('mouseup', handleMouseUp);
 
   // 点击其它区域隐藏翻译组件
-  document.addEventListener('mousedown', (e) => {
-    if (e.target === host || host.contains(e.target)) return;
+  const handleMouseDown = (e) => {
+    const isClickedInsideHost = e.target === host || (e.composedPath && e.composedPath().includes(host)) || host.contains(e.target);
+    if (isClickedInsideHost) return;
+
     if (!floatIcon.classList.contains('hidden')) {
       hideIcon();
     }
-    const isClickedInsideHost = (e.target === host || host.contains(e.target));
-    if (!isClickedInsideHost && !isPinned && translatePanel.classList.contains('show')) {
+    if (!isPinned && translatePanel.classList.contains('show')) {
       hidePanel();
     }
-  });
+  };
+  document.addEventListener('mousedown', handleMouseDown);
 
   function showIcon(x, y) {
-    const scrollX = window.scrollX || window.pageXOffset;
-    const viewportRight = window.innerWidth + scrollX;
-    const safeX = Math.max(scrollX + 5, Math.min(x, viewportRight - 40));
-    const safeY = Math.max(10, y);
+    const safeX = Math.max(10, Math.min(x, window.innerWidth - 44));
+    const safeY = Math.max(10, Math.min(y, window.innerHeight - 44));
 
     floatIcon.style.left = `${safeX}px`;
     floatIcon.style.top = `${safeY}px`;
@@ -767,12 +830,12 @@
 
   function showPanel(x, y, text, engine, targetLang) {
     hideIcon();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
     
     const panelWidth = translatePanel.offsetWidth || 360;
-    const scrollX = window.scrollX || window.pageXOffset;
-    const viewportRight = window.innerWidth + scrollX;
-    const safeX = Math.max(scrollX + 10, Math.min(x, viewportRight - panelWidth - 20));
-    const safeY = Math.max(10, y);
+    const panelHeight = translatePanel.offsetHeight || 220;
+    const safeX = Math.max(10, Math.min(x, window.innerWidth - panelWidth - 16));
+    const safeY = Math.max(10, Math.min(y, window.innerHeight - panelHeight - 16));
 
     translatePanel.style.left = `${safeX}px`;
     translatePanel.style.top = `${safeY}px`;
@@ -796,6 +859,11 @@
   }
 
   function hidePanel() {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    if (currentStreamPort) {
+      try { currentStreamPort.disconnect(); } catch (e) {}
+      currentStreamPort = null;
+    }
     translatePanel.classList.remove('show');
     setTimeout(() => {
       if (!translatePanel.classList.contains('show')) {
@@ -840,42 +908,139 @@
     }
   }
 
-  // 发起翻译请求
+  // 本地生词本与历史持久化存储
+  function saveVocabularyRecord(word, translation, engine, isStarred = false) {
+    if (!word || !translation) return;
+    chrome.storage.local.get({ vocabularyHistory: [] }, (res) => {
+      let list = Array.isArray(res.vocabularyHistory) ? res.vocabularyHistory : [];
+      const cleanWord = word.trim();
+      const existingIndex = list.findIndex(item => item.word.toLowerCase() === cleanWord.toLowerCase());
+      if (existingIndex >= 0) {
+        list[existingIndex].translation = translation.trim();
+        list[existingIndex].engine = engine;
+        list[existingIndex].timestamp = Date.now();
+        if (isStarred !== undefined) list[existingIndex].starred = isStarred;
+      } else {
+        list.unshift({
+          id: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          word: cleanWord,
+          translation: translation.trim(),
+          engine: engine,
+          timestamp: Date.now(),
+          starred: !!isStarred,
+          url: window.location.href
+        });
+        if (list.length > 2000) {
+          const starred = list.filter(item => item.starred);
+          const unstarred = list.filter(item => !item.starred);
+          list = [...starred, ...unstarred.slice(0, 2000 - starred.length)];
+        }
+      }
+      chrome.storage.local.set({ vocabularyHistory: list });
+    });
+  }
+
+  // 发起翻译请求 (支持长连接 SSE 逐字打字机流式输出)
   function doTranslation(text, engine, targetLang, modelName) {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    if (panelStarBtn) {
+      panelStarBtn.classList.remove('active', 'starred');
+      panelStarBtn.style.color = '';
+    }
+
+    // 若上一个流式请求尚未结束，立刻切断中断信号，防止 Token 泄露
+    if (currentStreamPort) {
+      try { currentStreamPort.disconnect(); } catch (e) {}
+      currentStreamPort = null;
+    }
+
     panelLoader.classList.remove('hidden');
     panelResultText.classList.add('hidden');
+    panelResultText.classList.remove('error');
+    panelResultText.textContent = '';
 
-    chrome.runtime.sendMessage({
-      action: 'translate',
-      text: text,
-      engine: engine,
-      targetLang: targetLang,
-      model: modelName
-    }, (response) => {
-      panelLoader.classList.add('hidden');
-      panelResultText.classList.remove('hidden');
+    let streamedText = '';
 
-      if (!response) {
-        panelResultText.textContent = '翻译超时或服务未响应';
-        panelResultText.classList.add('error');
-        return;
-      }
+    try {
+      currentStreamPort = chrome.runtime.connect({ name: 'translate-stream' });
+      currentStreamPort.postMessage({
+        text: text,
+        engine: engine,
+        targetLang: targetLang,
+        model: modelName
+      });
 
-      if (response.success) {
-        panelResultText.textContent = response.translation;
-        panelResultText.classList.remove('error');
-      } else {
-        panelResultText.textContent = `出错: ${response.error}`;
-        panelResultText.classList.add('error');
-      }
-    });
+      currentStreamPort.onMessage.addListener((msg) => {
+        if (msg.type === 'start') {
+          panelLoader.classList.add('hidden');
+          panelResultText.classList.remove('hidden');
+          panelResultText.textContent = '';
+        } else if (msg.type === 'chunk') {
+          panelLoader.classList.add('hidden');
+          panelResultText.classList.remove('hidden');
+          streamedText += msg.delta;
+          panelResultText.textContent = streamedText;
+        } else if (msg.type === 'done') {
+          panelLoader.classList.add('hidden');
+          panelResultText.classList.remove('hidden');
+          const finalText = msg.fullText || streamedText;
+          panelResultText.textContent = finalText;
+          saveVocabularyRecord(text, finalText, engine, false);
+          if (currentStreamPort) {
+            try { currentStreamPort.disconnect(); } catch (e) {}
+            currentStreamPort = null;
+          }
+        } else if (msg.type === 'error') {
+          panelLoader.classList.add('hidden');
+          panelResultText.classList.remove('hidden');
+          panelResultText.textContent = `出错: ${msg.error}`;
+          panelResultText.classList.add('error');
+          if (currentStreamPort) {
+            try { currentStreamPort.disconnect(); } catch (e) {}
+            currentStreamPort = null;
+          }
+        }
+      });
+
+      currentStreamPort.onDisconnect.addListener(() => {
+        currentStreamPort = null;
+      });
+    } catch (err) {
+      // 兼容环境异常降级回退
+      chrome.runtime.sendMessage({
+        action: 'translate',
+        text: text,
+        engine: engine,
+        targetLang: targetLang,
+        model: modelName
+      }, (response) => {
+        panelLoader.classList.add('hidden');
+        panelResultText.classList.remove('hidden');
+
+        if (!response) {
+          panelResultText.textContent = '翻译超时或服务未响应';
+          panelResultText.classList.add('error');
+          return;
+        }
+
+        if (response.success) {
+          panelResultText.textContent = response.translation;
+          panelResultText.classList.remove('error');
+          saveVocabularyRecord(text, response.translation, engine, false);
+        } else {
+          panelResultText.textContent = `出错: ${response.error}`;
+          panelResultText.classList.add('error');
+        }
+      });
+    }
   }
 
   // 点击悬浮图标触发翻译
   floatIcon.addEventListener('click', (e) => {
     e.stopPropagation();
-    const x = parseFloat(floatIcon.style.left);
-    const y = parseFloat(floatIcon.style.top);
+    const rect = floatIcon.getBoundingClientRect();
+    const x = rect.left;
+    const y = rect.bottom + 6;
     getSettings((settings) => {
       showPanel(x, y, currentSelectedText, settings.defaultEngine, settings.defaultTargetLang);
     });
@@ -928,6 +1093,20 @@
     }
   });
 
+  // 收藏到生词本
+  if (panelStarBtn) {
+    panelStarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const word = currentSelectedText;
+      const trans = panelResultText.textContent;
+      if (!word || !trans || panelResultText.classList.contains('error')) return;
+
+      const isStarred = panelStarBtn.classList.toggle('starred');
+      panelStarBtn.style.color = isStarred ? '#ff9500' : '';
+      saveVocabularyRecord(word, trans, panelEngineSelect.value, isStarred);
+    });
+  }
+
   // 面板内切换引擎
   panelEngineSelect.addEventListener('change', () => {
     const engine = panelEngineSelect.value;
@@ -953,17 +1132,18 @@
   });
 
   // 右键菜单唤起监听
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const messageListener = (message, sender, sendResponse) => {
     if (message.action === 'showSelectionTranslatePopup') {
       currentSelectedText = message.text;
-      const x = window.innerWidth / 2 - 180 + window.scrollX;
-      const y = window.innerHeight / 3 + window.scrollY;
+      const x = Math.max(20, Math.round((window.innerWidth - 360) / 2));
+      const y = Math.max(40, Math.round(window.innerHeight / 4));
       getSettings((settings) => {
         showPanel(x, y, message.text, settings.defaultEngine, settings.defaultTargetLang);
       });
       sendResponse({ status: 'ok' });
     }
-  });
+  };
+  chrome.runtime.onMessage.addListener(messageListener);
 
   // 面板拖拽逻辑
   dragHandle.addEventListener('mousedown', (e) => {
@@ -978,21 +1158,37 @@
     e.preventDefault();
   });
 
-  document.addEventListener('mousemove', (e) => {
+  const handleMouseMove = (e) => {
     if (!isDragging) return;
-    const posX = e.clientX - dragOffset.x + window.scrollX;
-    const posY = e.clientY - dragOffset.y + window.scrollY;
+    const panelWidth = translatePanel.offsetWidth || 360;
+    const panelHeight = translatePanel.offsetHeight || 220;
+    const posX = Math.max(5, Math.min(window.innerWidth - panelWidth - 5, e.clientX - dragOffset.x));
+    const posY = Math.max(5, Math.min(window.innerHeight - panelHeight - 5, e.clientY - dragOffset.y));
     
     translatePanel.style.left = `${posX}px`;
     translatePanel.style.top = `${posY}px`;
-  });
+  };
+  document.addEventListener('mousemove', handleMouseMove);
 
-  document.addEventListener('mouseup', () => {
+  const handleDragMouseUp = () => {
     if (isDragging) {
       isDragging = false;
       document.body.style.cursor = '';
     }
-  });
+  };
+  document.addEventListener('mouseup', handleDragMouseUp);
+
+  // 实例清理钩子 (支持插件热重载与无刷新重注)
+  window.__iosTranslateCleanup = () => {
+    try { host.remove(); } catch (e) {}
+    document.removeEventListener('mouseup', handleMouseUp);
+    document.removeEventListener('mousedown', handleMouseDown);
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleDragMouseUp);
+    try {
+      chrome.runtime.onMessage.removeListener(messageListener);
+    } catch (e) {}
+  };
 
   // PDF 链接拦截功能
   document.addEventListener('click', (e) => {

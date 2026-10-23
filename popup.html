@@ -14,6 +14,10 @@
         <span class="logo-text">Translate FY</span>
       </div>
       <div style="display: flex; align-items: center; gap: 6px;">
+        <button class="pdf-nav-btn" id="vocab-nav-btn" title="生词本与查词历史">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          <span>生词本</span>
+        </button>
         <button class="pdf-nav-btn" id="pdf-nav-btn" title="打开 PDF 文档沉浸式对照翻译">
           <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
           <span>PDF 翻译</span>
@@ -97,6 +101,9 @@
             <button id="speak-res-btn" class="icon-btn" title="朗读译文">
               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
             </button>
+            <button id="star-btn" class="icon-btn" title="加入生词本">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+            </button>
             <button id="copy-btn" class="icon-btn" title="复制译文">
               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
             </button>
@@ -108,6 +115,36 @@
         </div>
       </div>
     </main>
+
+    <!-- Vocabulary Drawer / Overlay -->
+    <div id="vocab-overlay" class="vocab-overlay hidden">
+      <div class="vocab-header">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="#ff9500" stroke="#ff9500" stroke-width="1.5" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          <span style="font-size:14px; font-weight:600;">生词本 & 查词历史</span>
+        </div>
+        <button id="close-vocab-btn" class="close-btn" title="返回">✕</button>
+      </div>
+
+      <div class="vocab-search-row">
+        <input type="text" id="vocab-search-input" placeholder="检索历史查词与生词..." class="vocab-search-input">
+      </div>
+
+      <div class="vocab-tabs">
+        <button id="tab-vocab-all" class="vocab-tab active">全部 (<span id="count-all">0</span>)</button>
+        <button id="tab-vocab-starred" class="vocab-tab">★ 收藏 (<span id="count-starred">0</span>)</button>
+      </div>
+
+      <div id="vocab-list" class="vocab-list">
+        <!-- 动态渲染生词条目 -->
+      </div>
+
+      <div class="vocab-footer">
+        <button id="export-vocab-md-btn" class="vocab-action-btn" title="导出为 Markdown 文档">Markdown</button>
+        <button id="export-vocab-csv-btn" class="vocab-action-btn" title="导出为 CSV 表格">CSV</button>
+        <button id="clear-unstarred-btn" class="vocab-action-btn danger" title="仅清理未收藏的历史记录">清理未收藏</button>
+      </div>
+    </div>
   </div>
   <script type="module" src="/src/popup.js"></script>
 </body>
