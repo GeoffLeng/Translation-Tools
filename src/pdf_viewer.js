@@ -47,8 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const translatePageBtn = document.getElementById('translate-page-btn');
   const translateDocBtn = document.getElementById('translate-doc-btn');
   const summarizeDocBtn = document.getElementById('summarize-doc-btn');
-  const paperSummaryDrawer = document.getElementById('paper-summary-drawer');
-  const closeSummaryDrawerBtn = document.getElementById('close-summary-drawer-btn');
+  const paperSummaryModal = document.getElementById('paper-summary-modal') || document.getElementById('paper-summary-drawer');
+  const closeSummaryModalBtn = document.getElementById('close-summary-modal-btn') || document.getElementById('close-summary-drawer-btn');
   const copySummaryBtn = document.getElementById('copy-summary-btn');
   const summaryContent = document.getElementById('summary-content');
   const summaryStatusLabel = document.getElementById('summary-status-label');
@@ -69,6 +69,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const scannedPdfAlert = document.getElementById('scanned-pdf-alert');
   const dismissScannedAlert = document.getElementById('dismiss-scanned-alert');
   const viewerWorkspace = document.getElementById('viewer-workspace');
+
+  // 方案 A：沉浸式双语流视图控件
+  const viewModeBtn = document.getElementById('view-mode-btn');
+  const viewModeLabel = document.getElementById('view-mode-label');
+  const viewModeIcon = document.getElementById('view-mode-icon');
+  const bilingualReaderFlow = document.getElementById('bilingual-reader-flow');
+  let currentViewMode = 'inplace'; // 'inplace' | 'flow'
 
   // 还原【沉浸式翻译】两层工具栏与缩略图抽屉控件
   const targetLanguageSelect = document.getElementById('target-language-select');
@@ -1895,6 +1902,9 @@ document.addEventListener('DOMContentLoaded', () => {
           if (pageTranslations.has(currentPage)) {
             renderTransStageForPage(currentPage);
           }
+          if (currentViewMode === 'flow') {
+            renderBilingualReaderFlow();
+          }
         }
         if (cached.drawings && cached.drawings.size > 0) {
           cached.drawings.forEach((strokes, p) => {
@@ -2837,6 +2847,254 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // --- 方案 A：沉浸式双语对照流视图核心引擎 (Bilingual Flow Reader Engine) ---
+  let flowVirtualObserver = null;
+
+  function createFlowCardsForPage(p, blocks) {
+    const fragment = document.createDocumentFragment();
+    blocks.forEach(b => {
+      if (!b.originalText && !b.transText) return;
+      const isFormula = (b.type === 'formula');
+      const isHeading = (b.type === 'heading');
+      const card = document.createElement('div');
+      card.className = `flow-card ${isFormula ? 'is-formula-card' : ''} ${isHeading ? 'heading-card' : ''}`;
+      card.dataset.blockId = b.id;
+      card.dataset.pageNum = p;
+
+      let badgeClass = 'paragraph';
+      let badgeText = '段落';
+      if (b.type === 'heading') { badgeClass = 'heading'; badgeText = '章节标题'; }
+      else if (b.type === 'caption') { badgeClass = 'caption'; badgeText = '图表说明'; }
+      else if (b.type === 'formula') { badgeClass = 'formula'; badgeText = '数学公式'; }
+      else if (b.isCrossColumn) { badgeClass = 'cross-col'; badgeText = '跨栏缝合段落'; }
+
+      const header = document.createElement('div');
+      header.className = 'flow-card-header';
+      header.innerHTML = `
+        <span class="flow-card-badge ${badgeClass}">${badgeText}</span>
+        <div class="flow-card-tools">
+          <button type="button" class="flow-tool-btn btn-copy-trans" title="仅复制中文译文">复制译文</button>
+          <button type="button" class="flow-tool-btn btn-copy-both" title="复制英文原文与中文译文">双语复制</button>
+          <button type="button" class="flow-tool-btn btn-locate-orig" title="在左侧原版 PDF 中高亮定位此段">📍 定位原文</button>
+        </div>
+      `;
+
+      const body = document.createElement('div');
+      body.className = 'flow-card-body';
+      body.innerHTML = `
+        <div class="flow-col flow-orig">${escapeHtml(b.originalText)}</div>
+        <div class="flow-col flow-trans">${escapeHtml(b.transText || b.originalText)}</div>
+      `;
+
+      card.appendChild(header);
+      card.appendChild(body);
+
+      // 按钮交互绑定
+      const copyTransBtn = card.querySelector('.btn-copy-trans');
+      if (copyTransBtn) {
+        copyTransBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(b.transText || b.originalText).then(() => {
+            showToast('✓ 译文已复制到剪贴板');
+          });
+        });
+      }
+
+      const copyBothBtn = card.querySelector('.btn-copy-both');
+      if (copyBothBtn) {
+        copyBothBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(`${b.originalText}\n\n${b.transText || ''}`).then(() => {
+            showToast('✓ 双语对照已复制到剪贴板');
+          });
+        });
+      }
+
+      const locateBtn = card.querySelector('.btn-locate-orig');
+      if (locateBtn) {
+        locateBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          locateAndHighlightBlockInOriginal(b.pageNum || p, b.box, b.lineBoxes);
+        });
+      }
+
+      card.addEventListener('click', () => {
+        locateAndHighlightBlockInOriginal(b.pageNum || p, b.box, b.lineBoxes);
+      });
+
+      fragment.appendChild(card);
+    });
+    return fragment;
+  }
+
+  function renderBilingualReaderFlow() {
+    if (!bilingualReaderFlow) return;
+    bilingualReaderFlow.innerHTML = '';
+
+    if (flowVirtualObserver) {
+      flowVirtualObserver.disconnect();
+      flowVirtualObserver = null;
+    }
+
+    if (pageTranslations.size === 0) {
+      bilingualReaderFlow.innerHTML = `
+        <div class="flow-empty-hint">
+          <div class="flow-empty-hint-icon">📖</div>
+          <div style="font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 8px;">双语流视图 · 沉浸式阅读模式</div>
+          <div style="font-size: 13.5px; color: #64748b; max-width: 480px; margin: 0 auto 16px; line-height: 1.6;">
+            专为多栏、三栏复杂排版文献设计。彻底摆脱 PDF 原位狭窄物理框限制，跨栏跨页语义无缝缝合。
+          </div>
+          <div style="display: flex; justify-content: center; gap: 12px;">
+            <button id="flow-start-trans-page" class="modal-action-btn primary" style="padding: 6px 16px; font-size: 12.5px;">翻译当前页 (第 ${currentPage} 页)</button>
+            <button id="flow-start-trans-doc" class="modal-action-btn" style="padding: 6px 16px; font-size: 12.5px;">全文翻译</button>
+          </div>
+        </div>
+      `;
+      const btnPage = bilingualReaderFlow.querySelector('#flow-start-trans-page');
+      const btnDoc = bilingualReaderFlow.querySelector('#flow-start-trans-doc');
+      if (btnPage && translatePageBtn) btnPage.addEventListener('click', () => translatePageBtn.click());
+      if (btnDoc && translateDocBtn) btnDoc.addEventListener('click', () => translateDocBtn.click());
+      return;
+    }
+
+    const sortedPages = Array.from(pageTranslations.keys()).sort((a, b) => a - b);
+    const fragment = document.createDocumentFragment();
+    const totalPages = sortedPages.length;
+
+    // 当总翻译页数 > 6 时开启长篇轻量化虚拟观察器，严格回收视口外 DOM 显存
+    const enableVirtualization = (totalPages > 6);
+
+    flowVirtualObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const section = entry.target;
+        const pageNum = parseInt(section.dataset.pageNum, 10);
+        const cardsContainer = section.querySelector('.flow-page-cards');
+        if (!cardsContainer) return;
+
+        if (entry.isIntersecting) {
+          if (section.dataset.isRendered !== 'true') {
+            const blocks = pageTranslations.get(pageNum) || [];
+            cardsContainer.innerHTML = '';
+            cardsContainer.appendChild(createFlowCardsForPage(pageNum, blocks));
+            section.dataset.isRendered = 'true';
+            section.style.minHeight = '';
+          }
+        } else if (enableVirtualization) {
+          if (section.dataset.isRendered === 'true') {
+            // 记录已量测的物理高度，防止滚动条抖动跳跃
+            const measuredHeight = section.offsetHeight;
+            if (measuredHeight > 80) {
+              section.style.minHeight = `${measuredHeight}px`;
+            }
+            cardsContainer.innerHTML = `<div class="flow-cards-placeholder"><span>第 ${pageNum} 页 (已就绪 · 视口外显存已回收)</span></div>`;
+            section.dataset.isRendered = 'false';
+          }
+        }
+      });
+    }, {
+      root: bilingualReaderFlow,
+      rootMargin: '800px 0px'
+    });
+
+    sortedPages.forEach(p => {
+      const blocks = pageTranslations.get(p) || [];
+      if (blocks.length === 0) return;
+
+      const section = document.createElement('div');
+      section.className = 'flow-page-section';
+      section.dataset.pageNum = p;
+
+      const divider = document.createElement('div');
+      divider.className = 'flow-page-divider';
+      divider.dataset.pageNum = p;
+      divider.innerHTML = `<span>第 ${p} 页 (${blocks.length} 个语义段落)</span>`;
+      section.appendChild(divider);
+
+      const cardsContainer = document.createElement('div');
+      cardsContainer.className = 'flow-page-cards';
+
+      // 若不启用虚拟化或为前两页，直接挂载；否则留给 observer 按需挂载
+      if (!enableVirtualization || p <= 2 || p === currentPage) {
+        cardsContainer.appendChild(createFlowCardsForPage(p, blocks));
+        section.dataset.isRendered = 'true';
+      } else {
+        const estHeight = Math.max(160, blocks.length * 110);
+        section.style.minHeight = `${estHeight}px`;
+        cardsContainer.innerHTML = `<div class="flow-cards-placeholder"><span>第 ${p} 页 (滚动至此自动挂载)</span></div>`;
+        section.dataset.isRendered = 'false';
+      }
+
+      section.appendChild(cardsContainer);
+      fragment.appendChild(section);
+
+      flowVirtualObserver.observe(section);
+    });
+
+    bilingualReaderFlow.appendChild(fragment);
+  }
+
+  function locateAndHighlightBlockInOriginal(pageNum, box, lineBoxes) {
+    if (!currentPdf || !box) return;
+    const targetPageNum = pageNum || currentPage;
+    const pageContainer = viewerContainer.querySelector(`.page-container[data-page-num="${targetPageNum}"]`);
+    if (!pageContainer || !viewerMain) return;
+
+    // 清除已存在的流视图高光
+    viewerContainer.querySelectorAll('.flow-locate-highlight').forEach(el => el.remove());
+
+    const pageH = pageContainer.offsetHeight / currentScale;
+    const blockTop = (pageH - box.y - box.h) * currentScale;
+    const targetScrollY = pageContainer.offsetTop + blockTop - (viewerMain.clientHeight / 2) + 60;
+
+    viewerMain.scrollTo({
+      top: Math.max(0, targetScrollY),
+      behavior: 'smooth'
+    });
+
+    // 绘制高亮矩形
+    const boxesToHighlight = (Array.isArray(lineBoxes) && lineBoxes.length > 0) ? lineBoxes : [box];
+    boxesToHighlight.forEach(bx => {
+      const hl = document.createElement('div');
+      hl.className = 'flow-locate-highlight active-locate';
+      hl.style.position = 'absolute';
+      hl.style.left = `${Math.max(0, Math.round(bx.x * currentScale) - 4)}px`;
+      hl.style.top = `${Math.max(0, Math.round((pageH - bx.y - bx.h) * currentScale) - 3)}px`;
+      hl.style.width = `${Math.max(30, Math.round(bx.w * currentScale) + 8)}px`;
+      hl.style.height = `${Math.max(14, Math.round(bx.h * currentScale) + 6)}px`;
+      hl.style.pointerEvents = 'none';
+      hl.style.zIndex = '90';
+      pageContainer.appendChild(hl);
+
+      setTimeout(() => {
+        hl.classList.remove('active-locate');
+        setTimeout(() => hl.remove(), 400);
+      }, 2600);
+    });
+  }
+
+  function setViewMode(mode) {
+    currentViewMode = mode;
+    if (mode === 'flow') {
+      if (viewerContainerTrans) viewerContainerTrans.classList.add('hidden');
+      if (bilingualReaderFlow) bilingualReaderFlow.classList.remove('hidden');
+      if (viewModeLabel) viewModeLabel.textContent = '原位排版';
+      if (viewModeIcon) viewModeIcon.textContent = '📄';
+      if (controlStyleSelect && controlStyleSelect.value !== 'flow') {
+        controlStyleSelect.value = 'flow';
+      }
+      renderBilingualReaderFlow();
+    } else {
+      if (viewerContainerTrans) viewerContainerTrans.classList.remove('hidden');
+      if (bilingualReaderFlow) bilingualReaderFlow.classList.add('hidden');
+      if (viewModeLabel) viewModeLabel.textContent = '双语流视图';
+      if (viewModeIcon) viewModeIcon.textContent = '📖';
+      if (controlStyleSelect && controlStyleSelect.value === 'flow') {
+        controlStyleSelect.value = 'default';
+      }
+    }
+    chrome.storage.local.set({ pdfViewMode: mode });
+  }
+
   // 导出离线双语对照文档 (含独立可打印/存为PDF样式)
   function exportBilingualDocument(mode = 'download') {
     if (pageTranslations.size === 0) {
@@ -3479,16 +3737,36 @@ document.addEventListener('DOMContentLoaded', () => {
           blockType = 'caption';
         }
 
+        // 识别是否跨栏 (多栏跨度突变)
+        const isCrossColumn = (maxX - minX > pageWidth * 0.45) && (maxY - minY > pageHeight * 0.35);
+
+        let blockBox = {
+          x: Math.max(0, minX - 1),
+          y: minY,
+          w: Math.min(pageWidth - minX, maxX - minX + 2),
+          h: maxY - minY
+        };
+
+        // 若跨栏合并导致包围盒横跨半个以上页面，原位排版回退为起点栏包围盒，避免遮蔽中间区域；完整双语在 Flow 流视图中呈现
+        if (isCrossColumn && currentParagraphLines.length > 0) {
+          const firstLine = currentParagraphLines[0];
+          blockBox = {
+            x: Math.max(0, firstLine.box.x - 1),
+            y: firstLine.box.y,
+            w: Math.min(pageWidth - firstLine.box.x, firstLine.box.w + 2),
+            h: firstLine.box.h
+          };
+        }
+
         blocks.push({
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          pageNum: pageNum,
+          pageHeight: pageHeight,
           type: blockType,
           originalText: mergedText.trim(),
-          box: {
-            x: Math.max(0, minX - 1),
-            y: minY,
-            w: Math.min(pageWidth - minX, maxX - minX + 2),
-            h: maxY - minY
-          },
+          isCrossColumn: isCrossColumn,
+          lineBoxes: currentParagraphLines.map(l => ({ ...l.box })),
+          box: blockBox,
           style: {
             fontSize: Math.round(avgFontSize * 10) / 10,
             isBold: isBold,
@@ -3508,6 +3786,8 @@ document.addEventListener('DOMContentLoaded', () => {
         flushParagraph();
         blocks.push({
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          pageNum: pageNum,
+          pageHeight: pageHeight,
           type: 'formula',
           originalText: text,
           box: lineObj.box,
@@ -3525,6 +3805,8 @@ document.addEventListener('DOMContentLoaded', () => {
         flushParagraph();
         blocks.push({
           id: `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          pageNum: pageNum,
+          pageHeight: pageHeight,
           type: 'caption',
           originalText: text,
           box: lineObj.box,
@@ -3564,7 +3846,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let shouldBreak = false;
 
-        if (isColumnJump || isHeaderStyleChange || currIsListItem) {
+        // 核心突破：跨栏未闭合句子与切词连字符无缝缝合 (Cross-Column Stitching)
+        // 论文/研报从栏1底跳转至栏2顶时，若前行未以终结标点结束或前行有连字符或后行小写开头，绝对属于同一完整句子与段落，不可切碎！
+        const isCrossColumnContinuation = isColumnJump && !isHeaderStyleChange && !currIsListItem &&
+          (prevEndsWithHyphen || currStartsWithLower || !prevEndsWithTerminal);
+
+        if (isCrossColumnContinuation) {
+          shouldBreak = false;
+        } else if (isColumnJump || isHeaderStyleChange || currIsListItem) {
           shouldBreak = true;
         } else if (prevEndsWithHyphen || currStartsWithLower) {
           // 极高优先级连贯规则：前行连字符截断或当前行小写字母开头，语法上绝不可拆成两段！
@@ -3956,6 +4245,9 @@ document.addEventListener('DOMContentLoaded', () => {
       renderOverlayBlocksOnLayer(overlayLayer, blocks, pageHeight, currentScale, stage.canvas);
       pageTranslations.set(targetPageNum, blocks);
       transActiveBadge.textContent = isBatch ? '全文翻译中...' : `第 ${targetPageNum} 页 (无需翻译)`;
+      if (currentViewMode === 'flow') {
+        renderBilingualReaderFlow();
+      }
       return;
     }
 
@@ -4042,6 +4334,9 @@ document.addEventListener('DOMContentLoaded', () => {
       updateThumbnailStatus(targetPageNum);
       if (!isBatch) {
         showToast(`✓ 第 ${targetPageNum} 页翻译完成`);
+      }
+      if (currentViewMode === 'flow') {
+        renderBilingualReaderFlow();
       }
 
       // 超长篇批量翻译优化：若当前页不在视口内，立即释放重型 Canvas 显存，保留轻量骨架与已就绪状态
@@ -5767,10 +6062,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (summarizeDocBtn) {
     summarizeDocBtn.addEventListener('click', async () => {
-      if (!currentPdf) return;
+      if (!currentPdf) {
+        showToast('⚠️ 请先打开并加载一份 PDF 文档后再进行学术总结', 'warning');
+        return;
+      }
 
-      if (!paperSummaryDrawer) return;
-      paperSummaryDrawer.classList.remove('hidden');
+      if (!paperSummaryModal) return;
+      paperSummaryModal.classList.remove('hidden');
 
       if (summaryContent) summaryContent.innerHTML = '';
       lastSummaryMarkdown = '';
@@ -5856,13 +6154,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  if (closeSummaryDrawerBtn && paperSummaryDrawer) {
-    closeSummaryDrawerBtn.addEventListener('click', () => {
+  if (closeSummaryModalBtn && paperSummaryModal) {
+    closeSummaryModalBtn.addEventListener('click', () => {
       if (currentSummaryPort) {
         try { currentSummaryPort.disconnect(); } catch (e) {}
         currentSummaryPort = null;
       }
-      paperSummaryDrawer.classList.add('hidden');
+      paperSummaryModal.classList.add('hidden');
+    });
+  }
+
+  if (paperSummaryModal) {
+    paperSummaryModal.addEventListener('click', (e) => {
+      if (e.target === paperSummaryModal) {
+        if (currentSummaryPort) {
+          try { currentSummaryPort.disconnect(); } catch (e) {}
+          currentSummaryPort = null;
+        }
+        paperSummaryModal.classList.add('hidden');
+      }
     });
   }
 
@@ -5892,4 +6202,28 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // --- 方案 A：沉浸式双语流视图切换按钮与控制栏联动 ---
+  if (viewModeBtn) {
+    viewModeBtn.addEventListener('click', () => {
+      setViewMode(currentViewMode === 'flow' ? 'inplace' : 'flow');
+    });
+  }
+
+  if (controlStyleSelect) {
+    controlStyleSelect.addEventListener('change', () => {
+      if (controlStyleSelect.value === 'flow') {
+        setViewMode('flow');
+      } else if (currentViewMode === 'flow') {
+        setViewMode('inplace');
+      }
+    });
+  }
+
+  // 读取已保存的视图模式偏好
+  chrome.storage.local.get({ pdfViewMode: 'inplace' }, (res) => {
+    if (res.pdfViewMode === 'flow') {
+      setViewMode('flow');
+    }
+  });
 });

@@ -98,6 +98,11 @@
           <span>论文总结</span>
         </button>
 
+        <button id="view-mode-btn" class="top-action-btn flow-view-btn" title="在「原位排版」与「双语阅读流」之间切换 (推荐多栏研报与复杂论文)">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+          <span id="view-mode-label">双语流视图</span>
+        </button>
+
         <button id="advanced-trans-btn" class="top-action-btn purple-btn" title="微调专业术语遮罩、滑动窗口断句、翻译排版覆盖样式与大模型参数">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
           <span>高级选项</span>
@@ -184,10 +189,10 @@
           </button>
         </div>
 
-        <!-- 对照模式切换 (删除 Control Style 冗余文本) -->
         <div class="control-style-group" title="双语排版模式">
           <select id="control-style-select" class="sub-select-inline">
             <option value="bilingual">Bilingual (双语对照)</option>
+            <option value="flow">Flow (双语阅读流·多栏推荐)</option>
             <option value="original">Original (仅原文)</option>
             <option value="translation">Translation (仅译文)</option>
           </select>
@@ -340,9 +345,14 @@
               <button id="dismiss-scanned-alert" class="scanned-alert-close">✕</button>
             </div>
 
-            <!-- Mirrored Translated Pages -->
+            <!-- Mirrored Translated Pages (原位排版画板容器) -->
             <div id="pdf-viewer-container-trans" class="pdf-viewer-container">
               <!-- Rendered mirrored translated pages -->
+            </div>
+
+            <!-- Bilingual Clean Reader Flow (沉浸式双语阅读流容器) -->
+            <div id="bilingual-reader-flow" class="bilingual-reader-flow hidden">
+              <!-- Rendered bilingual flow cards -->
             </div>
           </div>
         </div>
@@ -706,31 +716,35 @@
         <span class="ink-slider-label">实</span>
       </div>
     </div>
-  <!-- 论文一键学术大纲与框架总结侧边抽屉 (Paper Summary Drawer) -->
-  <div id="paper-summary-drawer" class="paper-summary-drawer hidden">
-    <div class="summary-drawer-header">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#2563EB" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        <span class="summary-drawer-title">论文核心框架与学术总结</span>
-      </div>
-      <div style="display: flex; align-items: center; gap: 6px;">
-        <button id="copy-summary-btn" class="drawer-action-btn" title="复制总结 Markdown">复制</button>
-        <button id="close-summary-drawer-btn" class="drawer-close-btn" title="关闭">✕</button>
-      </div>
-    </div>
+  </div>
 
-    <div class="summary-drawer-badge-row">
-      <span class="summary-badge">⚡ 骨干抽取模式 (消耗约 1,800 Token)</span>
-      <span id="summary-status-label" class="summary-status-label">准备就绪</span>
-    </div>
-
-    <div class="summary-drawer-body">
-      <div id="summary-loading-spinner" class="summary-spinner-wrap hidden">
-        <div class="spinner" style="position:static; margin: 20px auto; border-top-color:#2563eb;"></div>
-        <p style="font-size:12.5px; color:#64748b; text-align:center;">正在提取 Abstract、目录骨架与 Conclusion...</p>
+  <!-- 论文一键学术大纲与框架总结居中模态弹窗 (Paper Summary Modal) -->
+  <div id="paper-summary-modal" class="advanced-modal-overlay hidden">
+    <div class="advanced-modal-box summary-modal-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#2563EB" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <h3>论文核心框架与学术大纲总结</h3>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="copy-summary-btn" class="drawer-action-btn" title="复制总结 Markdown">复制 Markdown</button>
+          <button id="close-summary-modal-btn" class="modal-close-btn" title="关闭">✕</button>
+        </div>
       </div>
-      <div id="summary-content" class="summary-markdown-content">
-        <!-- Markdown 总结内容 -->
+
+      <div class="summary-drawer-badge-row">
+        <span class="summary-badge">⚡ 骨干抽取模式 (消耗约 1,800 Token)</span>
+        <span id="summary-status-label" class="summary-status-label">准备就绪</span>
+      </div>
+
+      <div class="summary-modal-body">
+        <div id="summary-loading-spinner" class="summary-spinner-wrap hidden">
+          <div class="spinner" style="position:static; margin: 24px auto; border-top-color:#2563eb;"></div>
+          <p style="font-size:13px; color:#64748b; text-align:center;">正在提取 Abstract、目录骨架与 Conclusion...</p>
+        </div>
+        <div id="summary-content" class="summary-markdown-content">
+          <!-- Markdown 总结内容 -->
+        </div>
       </div>
     </div>
   </div>

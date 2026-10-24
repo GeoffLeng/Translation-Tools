@@ -98,6 +98,7 @@ Translation-Tools/
 ├── .gitignore             # Git 忽略规则
 ├── .gitattributes         # Git 行尾符规范
 ├── LICENSE                # MIT 开源许可证
+├── PROBLEM_SOLVING_TRACKER.md # 缺陷排查、技术方案与工程演进追踪档案
 ├── README.md              # 英文说明文档 (默认)
 └── README.zh-CN.md        # 中文说明文档
 ```
